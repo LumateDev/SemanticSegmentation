@@ -1,0 +1,18 @@
+# Virtual enviroment
+.venv/
+
+# Cache
+cache/
+__pycache__
+
+# Runtimes
+logs/
+checkpoints/
+
+# Large data
+datasets/raw
+datasets/unlabeled
+datasets/predicted
+datasets/ply
+
+
