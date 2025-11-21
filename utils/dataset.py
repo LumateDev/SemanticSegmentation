@@ -1,6 +1,5 @@
 """
-Датасет для загрузки и обработки LiDAR данных из LAS файлов
-Совместимость с laspy 2.x и поддержка конфигураций датасетов
+Датасет для загрузки и обработки LiDAR данных из LAS и XYZ файлов
 """
 
 import numpy as np
@@ -11,17 +10,18 @@ from pathlib import Path
 from tqdm import tqdm
 import pickle
 import os
+import pandas as pd
 
 
-class LASDataset(Dataset):
+class LidarDataset(Dataset):
     """
-    Датасет для LiDAR данных из LAS файлов
+    Универсальный датасет для LiDAR данных (LAS и XYZ форматы)
     Разбивает облако точек на блоки фиксированного размера
     """
     
     def __init__(
         self,
-        las_file,
+        data_file,
         num_points=4096,
         block_size=50.0,
         stride=None,
@@ -29,21 +29,23 @@ class LASDataset(Dataset):
         normalize=True,
         augment=False,
         cache_dir='cache',
-        dataset_config=None 
+        dataset_config=None,
+        file_type='auto'  # 'auto', 'las', 'xyz'
     ):
         """
         Args:
-            las_file: путь к LAS файлу
+            data_file: путь к файлу (LAS или XYZ)
             num_points: количество точек в блоке
             block_size: размер блока в метрах
             stride: шаг между блоками (по умолчанию block_size/2)
-            use_features: использовать ли доп. признаки (intensity, returns)
+            use_features: использовать ли доп. признаки (только для LAS)
             normalize: нормализовать ли признаки
             augment: применять ли аугментации
             cache_dir: папка для кэширования
             dataset_config: DatasetConfig объект или путь к YAML файлу
+            file_type: тип файла ('auto', 'las', 'xyz')
         """
-        self.las_file = las_file
+        self.data_file = data_file
         self.num_points = num_points
         self.block_size = block_size
         self.stride = stride if stride is not None else block_size / 2
@@ -52,28 +54,26 @@ class LASDataset(Dataset):
         self.augment = augment
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
-
+        
+        # Определение типа файла
+        if file_type == 'auto':
+            self.file_type = self._detect_file_type(data_file)
+        else:
+            self.file_type = file_type
+        
+        # Конфигурация датасета
         if dataset_config is None:
-            # Попытка автоопределения
             try:
                 from utils.dataset_config import auto_detect_config
-                dataset_config = auto_detect_config(las_file)
+                dataset_config = auto_detect_config(data_file)
             except:
                 pass
             
             if dataset_config is None:
-                # Fallback: используем NEON конфигурацию
-                print("⚠️  Конфигурация не определена, используется NEON по умолчанию")
-                try:
-                    from utils.dataset_config import DatasetConfig
-                    dataset_config = DatasetConfig('configs/datasets/neon_sample.yaml')
-                except:
-                    # Если нет конфига, используем старый маппинг
-                    print("⚠️  Используется стандартный маппинг классов")
-                    dataset_config = None
+                print("⚠️  Конфигурация не определена, используется стандартный маппинг")
+                dataset_config = None
         
         elif isinstance(dataset_config, (str, Path)):
-            # Загрузка из файла
             from utils.dataset_config import DatasetConfig
             dataset_config = DatasetConfig(dataset_config)
         
@@ -84,11 +84,12 @@ class LASDataset(Dataset):
             self.class_mapping = dataset_config.class_mapping
             self.num_classes = dataset_config.num_classes
         else:
-            # Fallback на старый маппинг
+            # Стандартный маппинг
             self.class_mapping = {1: 0, 2: 1, 5: 2, 6: 3}
             self.num_classes = 4
         
-        print(f"\n📂 Загрузка LAS файла: {las_file}")
+        print(f"\n📂 Загрузка файла: {data_file}")
+        print(f"📄 Тип файла: {self.file_type.upper()}")
         if dataset_config is not None:
             print(f"📋 Конфигурация: {dataset_config.name}")
         
@@ -100,12 +101,128 @@ class LASDataset(Dataset):
         print(f"   • Точек в блоке: {self.num_points}")
         print(f"   • Размер блока: {self.block_size}m")
         print(f"   • Stride: {self.stride}m")
-        print(f"   • Признаки: {'XYZ + intensity + returns' if use_features else 'Только XYZ'}")
+        print(f"   • Признаки: {'XYZ + intensity + returns' if use_features and self.file_type == 'las' else 'Только XYZ'}")
     
-    def _load_data(self):
-        """Загрузка данных из LAS файла"""
-        # Проверка кэша
-        cache_file = self.cache_dir / f"{Path(self.las_file).stem}_preprocessed.pkl"
+    def _detect_file_type(self, file_path):
+        """Автоматическое определение типа файла"""
+        file_ext = Path(file_path).suffix.lower()
+        
+        if file_ext == '.las' or file_ext == '.laz':
+            return 'las'
+        elif file_ext == '.xyz' or file_ext == '.txt':
+            return 'xyz'
+        else:
+            # Пытаемся определить по содержимому
+            try:
+                with open(file_path, 'r') as f:
+                    first_line = f.readline().strip()
+                    # Проверяем, похоже ли на XYZ формат (числа, разделенные пробелами/запятыми)
+                    parts = first_line.replace(',', ' ').split()
+                    if len(parts) >= 4 and all(self._is_float(x) for x in parts):
+                        return 'xyz'
+            except:
+                pass
+            
+            # По умолчанию считаем LAS
+            return 'las'
+    
+    def _is_float(self, x):
+        """Проверка, можно ли преобразовать в float"""
+        try:
+            float(x)
+            return True
+        except ValueError:
+            return False
+    
+    def _load_xyz_data(self):
+        """Загрузка данных из XYZ файла"""
+        print(f"   📖 Чтение XYZ файла...")
+        
+        # Чтение данных
+        data = []
+        with open(self.data_file, 'r') as f:
+            for line in tqdm(f, desc="   Чтение строк"):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Поддержка разных разделителей
+                parts = line.replace(',', ' ').split()
+                if len(parts) >= 4:
+                    try:
+                        # Формат: класс, x, y, z
+                        class_id = int(float(parts[0]))  # На случай дробных классов
+                        x = float(parts[1])
+                        y = float(parts[2])
+                        z = float(parts[3])
+                        data.append([class_id, x, y, z])
+                    except ValueError as e:
+                        print(f"   ⚠️  Пропущена строка: {line} (ошибка: {e})")
+                        continue
+        
+        if not data:
+            raise ValueError("XYZ файл не содержит валидных данных")
+        
+        data = np.array(data, dtype=np.float32)
+        
+        # Разделение на классы и координаты
+        labels = data[:, 0].astype(np.int32)
+        xyz = data[:, 1:4]  # x, y, z
+        
+        print(f"   • Загружено точек: {len(xyz):,}")
+        print(f"   • Исходные классы: {np.unique(labels)}")
+        
+        # Маппинг классов
+        if self.dataset_config is not None:
+            labels_mapped = self.dataset_config.map_labels(labels)
+        else:
+            # Автоматический маппинг для XYZ
+            unique_labels = np.unique(labels)
+            mapping = {orig: i for i, orig in enumerate(unique_labels)}
+            labels_mapped = np.array([mapping[l] for l in labels], dtype=np.int32)
+            self.class_mapping = mapping
+            self.num_classes = len(unique_labels)
+            print(f"   • Автоматический маппинг: {mapping}")
+        
+        # Удаляем точки с неизвестными классами
+        valid_mask = labels_mapped >= 0
+        xyz = xyz[valid_mask]
+        labels_mapped = labels_mapped[valid_mask]
+        
+        print(f"   • После фильтрации: {len(xyz):,} точек")
+        
+        # Распределение классов
+        unique_labels, counts = np.unique(labels_mapped, return_counts=True)
+        print(f"\n   📊 Распределение классов:")
+        total = len(labels_mapped)
+        for label, count in zip(unique_labels, counts):
+            percent = 100.0 * count / total
+            if self.dataset_config:
+                class_name = self.dataset_config.get_class_name(label)
+                print(f"      Класс {label} ({class_name}): {count:,} точек ({percent:.2f}%)")
+            else:
+                print(f"      Класс {label}: {count:,} точек ({percent:.2f}%)")
+        
+        # Нормализация координат (центрирование по минимуму)
+        self.bounds = {
+            'x_min': xyz[:, 0].min(),
+            'y_min': xyz[:, 1].min(),
+            'z_min': xyz[:, 2].min(),
+            'x_max': xyz[:, 0].max(),
+            'y_max': xyz[:, 1].max(),
+            'z_max': xyz[:, 2].max(),
+        }
+        
+        xyz[:, 0] -= self.bounds['x_min']
+        xyz[:, 1] -= self.bounds['y_min']
+        
+        self.points = xyz
+        self.labels = labels_mapped
+        self.features = {}  # XYZ файлы не содержат дополнительных признаков
+    
+    def _load_las_data(self):
+        """Загрузка данных из LAS файла (существующий код)"""     
+        cache_file = self.cache_dir / f"{Path(self.data_file).stem}_preprocessed.pkl"
         
         if cache_file.exists():
             print(f"   📦 Загрузка из кэша: {cache_file}")
@@ -117,9 +234,8 @@ class LASDataset(Dataset):
                 self.bounds = cached['bounds']
             return
         
-        # Загрузка LAS
         print(f"   📖 Чтение LAS файла...")
-        las = laspy.read(self.las_file)
+        las = laspy.read(self.data_file)
         
         # Координаты
         xyz = np.vstack([
@@ -161,7 +277,7 @@ class LASDataset(Dataset):
         print(f"   • Классы: {np.unique(labels)}")
         print(f"   • Признаков: {len(features)}")
         
-        # 🆕 Маппинг классов через конфигурацию
+        # Маппинг классов через конфигурацию
         if self.dataset_config is not None:
             labels_mapped = self.dataset_config.map_labels(labels)
         else:
@@ -218,9 +334,16 @@ class LASDataset(Dataset):
                 'bounds': self.bounds
             }, f)
     
+    def _load_data(self):
+        """Загрузка данных в зависимости от типа файла"""
+        if self.file_type == 'xyz':
+            self._load_xyz_data()
+        else:  # las
+            self._load_las_data()
+    
     def _create_blocks(self):
-        """Разбиение облака точек на блоки"""
-        cache_file = self.cache_dir / f"{Path(self.las_file).stem}_blocks_{self.block_size}_{self.stride}.pkl"
+        """Разбиение облака точек на блоки (существующий код)"""
+        cache_file = self.cache_dir / f"{Path(self.data_file).stem}_blocks_{self.block_size}_{self.stride}.pkl"
         
         if cache_file.exists():
             print(f"\n   📦 Загрузка блоков из кэша: {cache_file}")
@@ -311,8 +434,8 @@ class LASDataset(Dataset):
         block_points = block_points[choice]
         block_labels = block_labels[choice]
         
-        # Добавление признаков
-        if self.use_features:
+        # Добавление признаков (только для LAS)
+        if self.use_features and self.file_type == 'las':
             feature_list = []
             
             # Intensity
@@ -416,3 +539,7 @@ class LASDataset(Dataset):
                 print(f"   Класс {cls}: {count:,} точек ({percent:.2f}%)")
         
         return distribution
+    
+    def get_file_type(self):
+        """Получить тип файла"""
+        return self.file_type

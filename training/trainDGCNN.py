@@ -26,7 +26,7 @@ import traceback
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.modelDGCNN import DGCNN_LiDAR
-from utils.dataset import LASDataset
+from utils.dataset import LidarDataset
 from utils.losses import FocalLoss, compute_class_weights
 from utils.metrics import SegmentationMetrics
 
@@ -248,16 +248,16 @@ class DGCNNTrainer:
         self.val_metrics = SegmentationMetrics(num_classes=dataset_config.num_classes)
         
         # Создание полного датасета
-        full_dataset = LASDataset(
-            las_file=self.config['las_file'],
+        full_dataset = LidarDataset(
+            data_file=self.config['las_file'],  # переименуем параметр для универсальности
             num_points=self.config['num_points'],
             block_size=self.config['block_size'],
             stride=self.config['stride'],
             use_features=self.config['use_features'],
             normalize=self.config['normalize'],
             augment=False,
-            dataset_config=dataset_config  # 🆕 ПЕРЕДАЕМ КОНФИГУРАЦИЮ
-        )
+            dataset_config=dataset_config
+        )   
         
         # Train/Val split
         train_size = int(self.config['train_ratio'] * len(full_dataset))
