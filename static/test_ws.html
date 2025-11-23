@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DGCNN Test Logs</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .nav { margin-bottom: 20px; }
+        .nav a { margin-right: 15px; text-decoration: none; color: #007bff; }
+        #logs { 
+            background: #1e1e1e; 
+            color: #d4d4d4; 
+            padding: 15px; 
+            height: 70vh; 
+            overflow-y: scroll; 
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .status { 
+            padding: 10px; 
+            margin-bottom: 10px; 
+            border-radius: 5px; 
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .log-info { color: #d4d4d4; }
+        .log-warning { color: #ffcc00; }
+        .log-error { color: #ff6b6b; }
+        .log-debug { color: #4ecdc4; }
+    </style>
+</head>
+<body>
+    <h1>🧠 DGCNN Model Test</h1>
+    <div class="nav">
+        <a href="/api/models.html">Модели</a>
+        <a href="/api/datasets.html">Датасеты</a>
+        <a href="/api/train.html">Обучение</a>
+        <a href="/api/predict.html">Предсказание</a>
+        <a href="/api/test_ws.html">Тест модели</a>
+        <a href="/api/compare.html">Сравнение</a>
+    </div>
+
+    <div id="status" class="status"></div>
+    <pre id="logs"></pre>
+
+    <script>
+        const logs = document.getElementById('logs');
+        const status = document.getElementById('status');
+        
+        function connectWebSocket() {
+            status.className = 'status';
+            status.textContent = '🟡 Подключение...';
+            
+            const ws = new WebSocket("ws://127.0.0.1:8000/api/ws/test-model");
+
+            ws.onopen = () => {
+                status.className = 'status connected';
+                status.textContent = '🟢 WebSocket подключён — логи транслируются в реальном времени';
+                logs.textContent = '';
+                // ✅ Отправляем пустой конфиг
+                ws.send(JSON.stringify({}));
+            };
+
+            ws.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    
+                    if (data.type === 'log') {
+                        // Добавляем лог с цветом в зависимости от уровня
+                        const logLine = document.createElement('div');
+                        logLine.className = `log-${data.level}`;
+                        logLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ${data.message}`;
+                        logs.appendChild(logLine);
+                    } else if (data.type === 'result') {
+                        // Результат операции
+                        const resultLine = document.createElement('div');
+                        resultLine.className = 'log-info';
+                        resultLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ✅ Результат: ${data.data.message}`;
+                        logs.appendChild(resultLine);
+                    } else if (data.type === 'error') {
+                        // Ошибка
+                        const errorLine = document.createElement('div');
+                        errorLine.className = 'log-error';
+                        errorLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ❌ ОШИБКА: ${data.data.error}`;
+                        logs.appendChild(errorLine);
+                    } else {
+                        // Просто текстовое сообщение
+                        const textLine = document.createElement('div');
+                        textLine.className = 'log-info';
+                        textLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ${e.data}`;
+                        logs.appendChild(textLine);
+                    }
+                    
+                    logs.scrollTop = logs.scrollHeight;
+                } catch (error) {
+                    // Если не JSON, просто выводим как текст
+                    const textLine = document.createElement('div');
+                    textLine.className = 'log-info';
+                    textLine.textContent = `[${new Date().toLocaleTimeString()}] ${e.data}`;
+                    logs.appendChild(textLine);
+                    logs.scrollTop = logs.scrollHeight;
+                }
+            };
+
+            ws.onclose = () => {
+                status.className = 'status disconnected';
+                status.textContent = '🔴 Соединение закрыто';
+            };
+
+            ws.onerror = () => {
+                status.className = 'status disconnected';
+                status.textContent = '❌ Ошибка соединения';
+            };
+        }
+
+        // Автостарт при загрузке
+        connectWebSocket();
+    </script>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Список датасетов</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .nav { margin-bottom: 20px; }
+        .nav a { margin-right: 15px; text-decoration: none; color: #007bff; }
+        .dataset-list { border: 1px solid #ddd; border-radius: 5px; padding: 15px; }
+        .dataset-section { margin-bottom: 20px; }
+        .dataset-section h3 { margin-top: 0; color: #495057; }
+        .dataset-item { padding: 10px; border-bottom: 1px solid #eee; }
+        .dataset-stats { margin-top: 10px; padding: 10px; background: #f8f9fa; border-radius: 5px; }
+        .stats-table { width: 100%; border-collapse: collapse; margin-top: 5px; }
+        .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 5px; text-align: left; }
+        .stats-table th { background: #e9ecef; }
+        .refresh-btn { background: #28a745; color: white; padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; margin-bottom: 10px; }
+        .stats-btn { background: #17a2b8; color: white; padding: 4px 8px; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; }
+        .stats-btn:hover { background: #138496; }
+    </style>
+</head>
+<body>
+    <h1>📊 Список датасетов</h1>
+    <div class="nav">
+        <a href="/api/models.html">Модели</a>
+        <a href="/api/datasets.html">Датасеты</a>
+        <a href="/api/train.html">Обучение</a>
+        <a href="/api/predict.html">Предсказание</a>
+        <a href="/api/test_ws.html">Тест модели</a>
+        <a href="/api/compare.html">Сравнение</a>
+    </div>
+
+    <button class="refresh-btn" onclick="loadDatasets()">🔄 Обновить</button>
+
+    <div class="dataset-list" id="datasets">
+        <p>Загрузка...</p>
+    </div>
+
+    <script>
+        async function loadDatasets() {
+            try {
+                const res = await fetch('/api/datasets');
+                const data = await res.json();
+                const div = document.getElementById('datasets');
+
+                let html = '';
+
+                // Проходим по всем поддиректориям (raw, predicted, и т.д.)
+                for (const [subdir, files] of Object.entries(data)) {
+                    if (!files || files.length === 0) {
+                        continue;
+                    }
+
+                    html += `
+                        <div class="dataset-section">
+                            <h3>📁 ${subdir.charAt(0).toUpperCase() + subdir.slice(1)}</h3>
+                    `;
+
+                    for (const ds of files) {
+                        html += `
+                            <div class="dataset-item">
+                                <strong>${ds.name}</strong><br>
+                                <small>Файл: ${ds.file} | Размер: ${ds.size} | Точек: ${ds.points}</small>
+                                <br>
+                                <button class="stats-btn" onclick="showStats('${ds.file}', '${subdir}')">📊 Статистика</button>
+                                <div id="stats-${ds.file}" class="dataset-stats" style="display: none;"></div>
+                            </div>
+                        `;
+                    }
+
+                    html += '</div>';
+                }
+
+                if (!html) {
+                    html = '<p>❌ .xyz датасеты не найдены</p>';
+                }
+
+                div.innerHTML = html;
+            } catch (err) {
+                document.getElementById('datasets').innerHTML = '<p>❌ Ошибка загрузки</p>';
+            }
+        }
+
+        async function showStats(fileName, subdir) {
+            const statsDiv = document.getElementById(`stats-${fileName}`);
+            
+            try {
+                const res = await fetch(`/api/dataset-stats?file_path=${encodeURIComponent(fileName)}&subdir=${encodeURIComponent(subdir)}`);
+                const data = await res.json();
+
+                let tableHtml = `
+                    <p><strong>Всего точек:</strong> ${data.total_points.toLocaleString()} | <strong>Классов:</strong> ${data.unique_classes}</p>
+                    <table class="stats-table">
+                        <thead>
+                            <tr>
+                                <th>Класс</th>
+                                <th>Метка</th>
+                                <th>Кол-во</th>
+                                <th>%</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                for (const [className, stats] of Object.entries(data.class_stats)) {
+                    tableHtml += `
+                        <tr>
+                            <td>${className}</td>
+                            <td>${stats.label}</td>
+                            <td>${stats.count.toLocaleString()}</td>
+                            <td>${stats.percentage}%</td>
+                        </tr>
+                    `;
+                }
+
+                tableHtml += `
+                        </tbody>
+                    </table>
+                `;
+
+                statsDiv.innerHTML = tableHtml;
+                statsDiv.style.display = 'block';
+            } catch (err) {
+                statsDiv.innerHTML = `<p style="color: red;">❌ Ошибка загрузки статистики: ${err.message}</p>`;
+                statsDiv.style.display = 'block';
+            }
+        }
+
+        loadDatasets();
+    </script>
+</body>
+</html>

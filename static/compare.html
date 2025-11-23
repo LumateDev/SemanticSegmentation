@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Сравнение XYZ файлов</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .nav { margin-bottom: 20px; }
+        .nav a { margin-right: 15px; text-decoration: none; color: #007bff; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; }
+        .form-group input, .form-group select { width: 300px; padding: 5px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px; }
+        .stats-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .stats-table th, .stats-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .stats-table th { background: #f2f2f2; }
+        .success { color: green; }
+        .warning { color: orange; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Сравнение XYZ файлов</h1>
+    <div class="nav">
+        <a href="/api/models.html">Модели</a>
+        <a href="/api/datasets.html">Датасеты</a>
+        <a href="/api/train.html">Обучение</a>
+        <a href="/api/predict.html">Предсказание</a>
+        <a href="/api/test_ws.html">Тест модели</a>
+        <a href="/api/predict.html">Предсказание</a>
+    </div>
+
+    <div class="form-group">
+        <label for="originalFile">Исходный файл (.xyz):</label>
+        <select id="originalFile"></select>
+    </div>
+
+    <div class="form-group">
+        <label for="predictedFile">Предсказанный файл (.xyz):</label>
+        <select id="predictedFile"></select>
+    </div>
+
+    <button onclick="compareFiles()">Сравнить</button>
+
+    <div id="result" class="result" style="display: none;"></div>
+
+    <script>
+        // Загружаем списки файлов
+        async function loadFileLists() {
+            try {
+                // Загружаем исходные файлы (из raw)
+                const rawRes = await fetch('/api/datasets?subdir=raw');
+                const rawFiles = await rawRes.json();
+                const origSelect = document.getElementById('originalFile');
+                origSelect.innerHTML = '';
+                rawFiles.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.file;  // file.file — имя файла
+                    option.textContent = file.file;
+                    origSelect.appendChild(option);
+                });
+
+                // Загружаем предсказанные файлы (из predicted)
+                const predRes = await fetch('/api/datasets?subdir=predicted');
+                const predFiles = await predRes.json();
+                const predSelect = document.getElementById('predictedFile');
+                predSelect.innerHTML = '';
+                predFiles.forEach(file => {
+                    const option = document.createElement('option');
+                    option.value = file.file;
+                    option.textContent = file.file;
+                    predSelect.appendChild(option);
+                });
+            } catch (e) {
+                console.error('Ошибка загрузки списков файлов:', e);
+            }
+        }
+
+        async function compareFiles() {
+            const origFile = document.getElementById('originalFile').value;
+            const predFile = document.getElementById('predictedFile').value;
+
+            if (!origFile || !predFile) {
+                alert('Выберите оба файла');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/compare-xyz?original_file=${encodeURIComponent(origFile)}&predicted_file=${encodeURIComponent(predFile)}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (e) {
+                console.error('Ошибка:', e);
+                document.getElementById('result').innerHTML = `<div class="error">❌ Ошибка: ${e.message}</div>`;
+                document.getElementById('result').style.display = 'block';
+            }
+        }
+
+        function displayResults(data) {
+            const resultDiv = document.getElementById('result');
+            
+            // Безопасное форматирование чисел
+            const safeNumber = (num) => {
+                if (num === undefined || num === null) return 'N/A';
+                return typeof num === 'number' ? num.toLocaleString() : String(num);
+            };
+
+            let html = `
+                <h3>📊 Результаты сравнения</h3>
+                <p><strong>Всего точек:</strong> ${safeNumber(data.total_points)}</p>
+                <p><strong>Совпадение координат:</strong> ${data.coordinates_match ? '✅ Да' : '❌ Нет'}</p>
+                <p><strong>Совпадение меток:</strong> ${safeNumber(data.matching_labels)} / ${safeNumber(data.total_points)} (${safeNumber(data.accuracy)}%)</p>
+                <p><strong>Уникальных классов (оригинал):</strong> ${safeNumber(data.original_stats?.total_classes)}</p>
+                <p><strong>Уникальных классов (предсказание):</strong> ${safeNumber(data.predicted_stats?.total_classes)}</p>
+            `;
+
+            // Добавляем таблицу статистики только если есть данные
+            if (data.detailed_class_stats && Object.keys(data.detailed_class_stats).length > 0) {
+                html += `<h4>Статистика по классам:</h4>
+                <table class="stats-table">
+                    <thead>
+                        <tr>
+                            <th>Класс</th>
+                            <th>Оригинал</th>
+                            <th>Предсказание</th>
+                            <th>Разница</th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                for (const [className, stats] of Object.entries(data.detailed_class_stats)) {
+                    html += `
+                        <tr>
+                            <td>${className}</td>
+                            <td>${stats.original || 'N/A'}</td>
+                            <td>${stats.predicted || 'N/A'}</td>
+                            <td>${stats.diff || 'N/A'}</td>
+                        </tr>
+                    `;
+                }
+
+                html += `</tbody></table>`;
+            } else {
+                html += `<p>❌ Нет данных о статистике по классам</p>`;
+            }
+
+            resultDiv.innerHTML = html;
+            resultDiv.style.display = 'block';
+        }
+        
+        loadFileLists();
+    </script>
+</body>
+</html>

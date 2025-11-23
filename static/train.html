@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Обучение модели</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .nav { margin-bottom: 20px; }
+        .nav a { margin-right: 15px; text-decoration: none; color: #007bff; }
+        .training-container { display: flex; gap: 20px; }
+        .config-panel { flex: 1; border: 1px solid #ddd; border-radius: 5px; padding: 20px; }
+        .logs-panel { flex: 2; border: 1px solid #ddd; border-radius: 5px; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .train-btn { background: #28a745; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; width: 100%; font-size: 16px; }
+        .train-btn:disabled { background: #6c757d; cursor: not-allowed; }
+        #logs { 
+            background: #1e1e1e; 
+            color: #d4d4d4; 
+            padding: 15px; 
+            height: 500px; 
+            overflow-y: scroll; 
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.3;
+            white-space: pre-wrap;
+        }
+        .status { 
+            padding: 10px; 
+            margin-bottom: 10px; 
+            border-radius: 5px; 
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .name-hint { 
+            font-size: 12px; 
+            color: #666; 
+            margin-top: 5px; 
+        }
+        .datasets-container {
+            max-height: 200px; /* Ограничение высоты */
+            overflow-y: auto; /* Прокрутка */
+            border: 1px solid #ccc;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .dataset-item {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Обучение DGCNN модели</h1>
+    <div class="nav">
+        <a href="/api/models.html">Модели</a>
+        <a href="/api/datasets.html">Датасеты</a>
+        <a href="/api/train.html">Обучение</a>
+        <a href="/api/predict.html">Предсказание</a>
+        <a href="/api/test_ws.html">Тест модели</a>
+        <a href="/api/compare.html">Сравнение</a>
+    </div>
+
+    <div class="training-container">
+        <div class="config-panel">
+            <h3>⚙️ Конфигурация обучения</h3>
+            
+            <div class="form-group">
+                <label for="modelName">Название модели:</label>
+                <input type="text" id="modelName" placeholder="Например: my_model_v1">
+                <div class="name-hint">Оставьте пустым для автоматического названия</div>
+            </div>
+
+            <!-- НОВОЕ: Выбор нескольких датасетов -->
+            <div class="form-group">
+                <label>Датасеты (.xyz):</label>
+                <div id="datasetsContainer" class="datasets-container">
+                    <p>Загрузка датасетов...</p>
+                </div>
+            </div>
+
+            <!-- НОВОЕ: Выбор чекпоинта для дообучения -->
+            <div class="form-group">
+                <label for="checkpointFile">Чекпоинт для дообучения (опционально):</label>
+                <select id="checkpointFile">
+                    <option value="">Не дообучать (новая модель)</option>
+                    <!-- Заполняется динамически -->
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="batchSize">Batch Size:</label>
+                <input type="number" id="batchSize" value="8" min="1" max="32">
+            </div>
+            
+            <div class="form-group">
+                <label for="epochs">Количество эпох:</label>
+                <input type="number" id="epochs" value="3" min="1" max="100">
+            </div>
+            
+            <div class="form-group">
+                <label for="learningRate">Learning Rate:</label>
+                <input type="number" id="learningRate" value="0.001" step="0.0001" min="0.0001" max="0.1">
+            </div>
+            
+            <button class="train-btn" onclick="startTraining()" id="trainBtn">🚀 Начать обучение</button>
+            
+            <div style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                <small>
+                    <strong>💡 Примечание:</strong><br>
+                    • Модель сохраняется в checkpoints/DGCNN/[название_модели]/<br>
+                    • Автоматическое имя: DGCNN_YYYYMMDD_HHMMSS<br>
+                    • Ручное имя: ваше_название_YYYYMMDD_HHMMSS
+                </small>
+            </div>
+        </div>
+        
+        <div class="logs-panel">
+            <h3>📊 Логи обучения</h3>
+            <div id="status" class="status disconnected">🔴 Ожидание подключения</div>
+            <pre id="logs"></pre>
+        </div>
+    </div>
+
+<script>
+    let ws = null;
+    let isTraining = false;
+    let allDatasets = []; // Храним список всех датасетов
+
+    // Загрузка доступных датасетов
+    async function loadDatasets() {
+        try {
+            const response = await fetch('/api/datasets');
+            const datasets = await response.json();
+            
+            allDatasets = datasets.raw; // Сохраняем
+
+            const container = document.getElementById('datasetsContainer');
+            container.innerHTML = ''; // Очищаем контейнер
+
+            if (allDatasets.length === 0) {
+                container.innerHTML = '<p>Нет доступных датасетов.</p>';
+                return;
+            }
+
+            allDatasets.forEach((ds, index) => {
+                const div = document.createElement('div');
+                div.className = 'dataset-item';
+                div.innerHTML = `
+                    <label>
+                        <input type="checkbox" name="dataset" value="${ds.file}" id="chk_${index}">
+                        ${ds.name} (${ds.points} точек)
+                    </label>
+                `;
+                container.appendChild(div);
+            });
+            
+        } catch (error) {
+            console.error('Ошибка загрузки датасетов:', error);
+            document.getElementById('datasetsContainer').innerHTML = '<p>Ошибка загрузки датасетов.</p>';
+        }
+    }
+
+    // Загрузка доступных чекпоинтов
+    async function loadCheckpoints() {
+        try {
+            const response = await fetch('/api/trained-models');
+            const models = await response.json();
+            
+            const select = document.getElementById('checkpointFile');
+            // Очищаем, но оставляем опцию "Не дообучать"
+            select.innerHTML = '<option value="">Не дообучать (новая модель)</option>';
+            
+            models.forEach(model => {
+                // Используем full_path для resume_from
+                const option = document.createElement('option');
+                option.value = model.full_path; // Полный путь к .pth файлу
+                option.textContent = `${model.display_name} (${model.modified})`;
+                select.appendChild(option);
+            });
+            
+        } catch (error) {
+            console.error('Ошибка загрузки чекпоинтов:', error);
+        }
+    }
+
+    function startTraining() {
+        if (isTraining) {
+            alert('Обучение уже запущено!');
+            return;
+        }
+
+        // Получаем выбранные датасеты
+        const selectedDatasetElements = document.querySelectorAll('input[name="dataset"]:checked');
+        const selectedDatasetFiles = Array.from(selectedDatasetElements).map(el => `datasets/raw/${el.value}`);
+
+        if (selectedDatasetFiles.length === 0) {
+            alert('Выберите хотя бы один датасет для обучения!');
+            return;
+        }
+
+        // Получаем выбранный чекпоинт (может быть пустым)
+        const selectedCheckpoint = document.getElementById('checkpointFile').value;
+
+        const config = {
+            model_name: document.getElementById('modelName').value.trim(),
+            xyz_files: selectedDatasetFiles, // Отправляем список файлов
+            batch_size: parseInt(document.getElementById('batchSize').value),
+            epochs: parseInt(document.getElementById('epochs').value),
+            learning_rate: parseFloat(document.getElementById('learningRate').value),
+            resume_from: selectedCheckpoint || null // Отправляем путь или null
+        };
+
+        connectWebSocket(config);
+    }
+
+    function connectWebSocket(config) {
+        status.className = 'status';
+        status.textContent = '🟡 Подключаемся к WebSocket...';
+        
+        ws = new WebSocket("ws://127.0.0.1:8000/api/ws/train-model");
+
+        ws.onopen = function() {
+            status.className = 'status connected';
+            status.textContent = '🟢 WebSocket подключён — запуск обучения...';
+            logs.textContent = '';
+            
+            // Отправляем конфигурацию
+            ws.send(JSON.stringify(config));
+            
+            isTraining = true;
+            document.getElementById('trainBtn').disabled = true;
+            document.getElementById('trainBtn').textContent = '🔄 Обучение...';
+        };
+
+        ws.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'log') {
+                    // Добавляем только сообщение лога, без JSON
+                    const logLine = document.createElement('div');
+                    logLine.className = `log-${data.level}`;
+                    logLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ${data.message}`;
+                    logs.appendChild(logLine);
+                } else if (data.type === 'result') {
+                    // Результат операции
+                    const resultLine = document.createElement('div');
+                    resultLine.className = 'log-info';
+                    resultLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ✅ Результат: ${data.data.message}`;
+                    logs.appendChild(resultLine);
+                    
+                    // Завершаем обучение
+                    isTraining = false;
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('trainBtn').textContent = '🚀 Начать обучение';
+                } else if (data.type === 'error') {
+                    // Ошибка
+                    const errorLine = document.createElement('div');
+                    errorLine.className = 'log-error';
+                    errorLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ❌ ОШИБКА: ${data.data.error || data.data.message}`;
+                    logs.appendChild(errorLine);
+                    
+                    // Завершаем обучение
+                    isTraining = false;
+                    document.getElementById('trainBtn').disabled = false;
+                    document.getElementById('trainBtn').textContent = '🚀 Начать обучение';
+                } else if (data.type === 'connection') {
+                    // Сообщение о подключении
+                    const connectionLine = document.createElement('div');
+                    connectionLine.className = 'log-info';
+                    connectionLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] 🔗 ${data.message}`;
+                    logs.appendChild(connectionLine);
+                } else {
+                    // Если не JSON лог, просто добавляем как есть
+                    const textLine = document.createElement('div');
+                    textLine.className = 'log-info';
+                    textLine.textContent = `[${new Date().toLocaleTimeString()}] ${event.data}`;
+                    logs.appendChild(textLine);
+                }
+                
+                logs.scrollTop = logs.scrollHeight;
+            } catch (error) {
+                // Если не JSON, просто выводим как текст
+                const textLine = document.createElement('div');
+                textLine.className = 'log-info';
+                textLine.textContent = `[${new Date().toLocaleTimeString()}] ${event.data}`;
+                logs.appendChild(textLine);
+                logs.scrollTop = logs.scrollHeight;
+            }
+        };
+
+        ws.onclose = function() {
+            status.className = 'status disconnected';
+            status.textContent = '🔴 Соединение закрыто';
+            isTraining = false;
+            document.getElementById('trainBtn').disabled = false;
+            document.getElementById('trainBtn').textContent = '🚀 Начать обучение';
+        };
+
+        ws.onerror = function(error) {
+            status.className = 'status disconnected';
+            status.textContent = '❌ Ошибка соединения';
+            console.error('WebSocket error:', error);
+        };
+    }
+
+    // Загружаем датасеты и чекпоинты при открытии страницы
+    loadDatasets();
+    loadCheckpoints();
+</script>
+</body>
+</html>

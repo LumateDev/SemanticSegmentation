@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Предсказание модели</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        h1 { color: #333; }
+        .nav { margin-bottom: 20px; }
+        .nav a { margin-right: 15px; text-decoration: none; color: #007bff; }
+        .predict-container { display: flex; gap: 20px; }
+        .config-panel { flex: 1; border: 1px solid #ddd; border-radius: 5px; padding: 20px; }
+        .logs-panel { flex: 2; border: 1px solid #ddd; border-radius: 5px; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .predict-btn { background: #17a2b8; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; width: 100%; font-size: 16px; }
+        .predict-btn:disabled { background: #6c757d; cursor: not-allowed; }
+        #logs { 
+            background: #1e1e1e; 
+            color: #d4d4d4; 
+            padding: 15px; 
+            height: 500px; 
+            overflow-y: scroll; 
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.3;
+            white-space: pre-wrap;
+        }
+        .status { 
+            padding: 10px; 
+            margin-bottom: 10px; 
+            border-radius: 5px; 
+        }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>🔮 Предсказание DGCNN модели</h1>
+    <div class="nav">
+        <a href="/api/models.html">Модели</a>
+        <a href="/api/datasets.html">Датасеты</a>
+        <a href="/api/train.html">Обучение</a>
+        <a href="/api/predict.html">Предсказание</a>
+        <a href="/api/test_ws.html">Тест модели</a>
+        <a href="/api/compare.html">Сравнение</a>
+    </div>
+
+    <div class="predict-container">
+        <div class="config-panel">
+            <h3>⚙️ Конфигурация предсказания</h3>
+            
+            <div class="form-group">
+                <label for="modelSelect">Модель:</label>
+                <select id="modelSelect">
+                    <option value="">Загрузка моделей...</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="datasetSelect">Unlabeled датасет:</label>
+                <select id="datasetSelect">
+                    <option value="">Загрузка датасетов...</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="batchSize">Batch Size:</label>
+                <input type="number" id="batchSize" value="16" min="1" max="32">
+            </div>
+            
+            <div class="form-group">
+                <label for="outputDir">Выходная папка:</label>
+                <input type="text" id="outputDir" value="datasets/predicted" readonly>
+            </div>
+            
+            <button class="predict-btn" onclick="startPrediction()" id="predictBtn">🔮 Запустить предсказание</button>
+            
+            <div style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                <small>
+                    <strong>💡 Примечание:</strong><br>
+                    • Используется обученная модель<br>
+                    • Обрабатываются unlabeled датасеты<br>
+                    • Результаты сохраняются в datasets/predicted/
+                </small>
+            </div>
+        </div>
+        
+        <div class="logs-panel">
+            <h3>📊 Логи предсказания</h3>
+            <div id="status" class="status disconnected">🔴 Ожидание подключения</div>
+            <pre id="logs"></pre>
+        </div>
+    </div>
+
+    <script>
+    let ws = null;
+    let isPredicting = false;
+
+    // Загрузка доступных моделей и датасетов
+    async function loadData() {
+        try {
+            // Загружаем обученные модели
+            const modelsResponse = await fetch('/api/trained-models');
+            const models = await modelsResponse.json();
+            
+            const modelSelect = document.getElementById('modelSelect');
+            modelSelect.innerHTML = '<option value="">Выберите модель...</option>';
+            
+            models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.full_path;
+                const displayName = model.display_name || model.folder;
+                option.textContent = `${displayName} (${model.size})`;
+                modelSelect.appendChild(option);
+            });
+
+            // Загружаем unlabeled датасеты
+            const datasetsResponse = await fetch('/api/datasets');
+            const datasets = await datasetsResponse.json();
+            
+            const datasetSelect = document.getElementById('datasetSelect');
+            datasetSelect.innerHTML = '<option value="">Выберите датасет...</option>';
+            
+            // ИСПРАВЛЕНИЕ: используем datasets.raw вместо datasets.unlabeled, если unlabeled не существует
+            const unlabeledDatasets = datasets.unlabeled || datasets.raw || [];
+            
+            unlabeledDatasets.forEach(ds => {
+                const option = document.createElement('option');
+                option.value = `datasets/raw/${ds.file}`; // Используем raw папку
+                option.textContent = `${ds.name} (${ds.points} точек)`;
+                datasetSelect.appendChild(option);
+            });
+            
+        } catch (error) {
+            console.error('Ошибка загрузки данных:', error);
+            // Показываем ошибку в интерфейсе
+            document.getElementById('modelSelect').innerHTML = '<option value="">❌ Ошибка загрузки моделей</option>';
+            document.getElementById('datasetSelect').innerHTML = '<option value="">❌ Ошибка загрузки датасетов</option>';
+        }
+    }
+
+    function startPrediction() {
+        if (isPredicting) {
+            alert('Предсказание уже запущено!');
+            return;
+        }
+
+        const config = {
+            checkpoint_path: document.getElementById('modelSelect').value,
+            input_file: document.getElementById('datasetSelect').value,
+            batch_size: parseInt(document.getElementById('batchSize').value),
+            output_dir: document.getElementById('outputDir').value
+        };
+
+        if (!config.checkpoint_path) {
+            alert('Выберите модель для предсказания!');
+            return;
+        }
+
+        if (!config.input_file) {
+            alert('Выберите датасет для предсказания!');
+            return;
+        }
+
+        connectWebSocket(config);
+    }
+
+    function connectWebSocket(config) {
+        status.className = 'status';
+        status.textContent = '🟡 Подключаемся к WebSocket...';
+        
+        ws = new WebSocket("ws://127.0.0.1:8000/api/ws/predict");
+
+        ws.onopen = function() {
+            status.className = 'status connected';
+            status.textContent = '🟢 WebSocket подключён — запуск предсказания...';
+            logs.textContent = '';
+            
+            // Отправляем конфигурацию
+            ws.send(JSON.stringify(config));
+            
+            isPredicting = true;
+            document.getElementById('predictBtn').disabled = true;
+            document.getElementById('predictBtn').textContent = '🔮 Предсказание...';
+        };
+
+        ws.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'log') {
+                    // Добавляем только сообщение лога, без JSON
+                    const logLine = document.createElement('div');
+                    logLine.className = `log-${data.level}`;
+                    logLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ${data.message}`;
+                    logs.appendChild(logLine);
+                } else if (data.type === 'result') {
+                    // Результат операции
+                    const resultLine = document.createElement('div');
+                    resultLine.className = 'log-info';
+                    resultLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ✅ Результат: ${data.data.message}`;
+                    logs.appendChild(resultLine);
+                    
+                    // Завершаем предсказание
+                    isPredicting = false;
+                    document.getElementById('predictBtn').disabled = false;
+                    document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+                } else if (data.type === 'error') {
+                    // Ошибка
+                    const errorLine = document.createElement('div');
+                    errorLine.className = 'log-error';
+                    errorLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ❌ ОШИБКА: ${data.data.error || data.data.message}`;
+                    logs.appendChild(errorLine);
+                    
+                    // Завершаем предсказание
+                    isPredicting = false;
+                    document.getElementById('predictBtn').disabled = false;
+                    document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+                } else if (data.type === 'connection') {
+                    // Сообщение о подключении
+                    const connectionLine = document.createElement('div');
+                    connectionLine.className = 'log-info';
+                    connectionLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] 🔗 ${data.message}`;
+                    logs.appendChild(connectionLine);
+                } else {
+                    // Если не JSON лог, просто добавляем как есть
+                    const textLine = document.createElement('div');
+                    textLine.className = 'log-info';
+                    textLine.textContent = `[${new Date().toLocaleTimeString()}] ${event.data}`;
+                    logs.appendChild(textLine);
+                }
+                
+                logs.scrollTop = logs.scrollHeight;
+            } catch (error) {
+                // Если не JSON, просто выводим как текст
+                const textLine = document.createElement('div');
+                textLine.className = 'log-info';
+                textLine.textContent = `[${new Date().toLocaleTimeString()}] ${event.data}`;
+                logs.appendChild(textLine);
+                logs.scrollTop = logs.scrollHeight;
+            }
+        };
+
+        ws.onclose = function() {
+            status.className = 'status disconnected';
+            status.textContent = '🔴 Соединение закрыто';
+            isPredicting = false;
+            document.getElementById('predictBtn').disabled = false;
+            document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+        };
+
+        ws.onerror = function(error) {
+            status.className = 'status disconnected';
+            status.textContent = '❌ Ошибка соединения';
+            console.error('WebSocket error:', error);
+        };
+    }
+
+    // Загружаем данные при открытии страницы
+    loadData();
+</script>
+</body>
+</html>
