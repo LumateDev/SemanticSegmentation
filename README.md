@@ -3,6 +3,7 @@
 ## ⚡ Quick Start
 
 ### System Requirements
+
 - **Python**: 3.11+ (required)
 - **CUDA**: 12.6+ (optional, for GPU acceleration)
 
@@ -28,7 +29,8 @@ python -m pip install --upgrade pip
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ```
 
-> ⚠️ **Important**: 
+> ⚠️ **Important**:
+>
 > - Python 3.11+ is required for compatibility with dependencies
 > - If CUDA installation fails, try using VPN or install CPU-only version
 > - This step is needed because requirements.txt may install PyTorch without CUDA
@@ -50,51 +52,50 @@ datasets/
 ├── unlabeled/     # 🔮 Clean datasets for prediction
 ```
 
-### 5. Data Preparation
-
-**Create unlabeled datasets from labeled ones:**
+### 5. Launch Application
 
 ```bash
-python .\utils\create_unlabeled.py
+uvicorn main:app --reload
 ```
 
-## 🛠️ Usage Commands
+### 6. Access Web Interface
 
-### 🧪 Test Model Architecture
-
-```bash
-python .\models\modelDGCNN.py
-```
-
-### 🎓 Train Model
-
-```bash
-python .\training\trainDGCNN.py --las_file datasets/raw/NEONDSSampleLiDARPointCloud.las
-```
-
-### 🔮 Run Prediction
-
-**First, check available trained models:**
-
-```bash
-dir .\checkpoints\DGCNN\
-```
-
-**Then run prediction with the latest model:**
-
-```bash
-python .\inference\predictDGCNN.py --checkpoint .\checkpoints\DGCNN\DGCNN_20251113_192702\best_model.pth --input .\datasets\unlabeled\NEONDSSampleLiDARPointCloud.las
-```
+- **📚 Swagger API Documentation**: http://127.0.0.1:8000/docs/
+- **🌐 Web Application**: http://127.0.0.1:8000/api/
 
 ---
 
-## 📋 Command Summary
+## 📋 Application Features
 
-| Action | Command |
-|--------|---------|
-| **Create unlabeled data** | `python .\utils\create_unlabeled.py` |
-| **Test model** | `python .\models\modelDGCNN.py` |
-| **Train model** | `python .\training\trainDGCNN.py --las_file datasets/raw/NEONDSSampleLiDARPointCloud.las` |
-| **Run prediction** | `python .\inference\predictDGCNN.py --checkpoint .\checkpoints\DGCNN\DGCNN_20251113_192702\best_model.pth --input .\datasets\unlabeled\NEONDSSampleLiDARPointCloud.las` |
+### 1. **Models**
 
-> ⚠️ **Note**: Always check the actual model folder name in `checkpoints/DGCNN/` before running prediction!
+- View available architectural models (DGCNN)
+- Browse trained models stored locally in `checkpoints/` folder
+
+### 2. **Datasets**
+
+- Explore datasets available on your local machine in `datasets/` folder
+- View overall list and detailed information for each dataset
+
+### 3. **Training**
+
+- Train new models or fine-tune existing ones
+- **3.1 New Model Training**: Enter model name, select one or multiple datasets, configure parameters, and start training
+- **3.2 Fine-tuning**: Select pre-trained model and continue training with new datasets and parameters
+
+### 4. **Prediction**
+
+- Select trained model and dataset
+- Configure prediction parameters
+- Generate predicted datasets
+
+### 5. **Model Testing**
+
+- Test model functionality and performance on your device
+- Verify model compatibility and operation
+
+### 6. **Comparison**
+
+- Compare one raw dataset with one predicted dataset
+- Analyze differences between classes within the datasets
+- Visualize and evaluate segmentation results
