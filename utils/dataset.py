@@ -425,36 +425,49 @@ class LidarDataset(Dataset):
         
         # Сэмплирование/дополнение до num_points
         if len(block_points) >= self.num_points:
-            # Random sampling
             choice = np.random.choice(len(block_points), self.num_points, replace=False)
         else:
-            # Repeat points
             choice = np.random.choice(len(block_points), self.num_points, replace=True)
         
         block_points = block_points[choice]
         block_labels = block_labels[choice]
         
-        # Добавление признаков (только для LAS)
-        if self.use_features and self.file_type == 'las':
+        # ВАЖНО: Добавление признаков для XYZ файлов
+        if self.use_features:
             feature_list = []
             
-            # Intensity
-            if 'intensity' in self.features:
-                intensity = self.features['intensity'][indices][choice]
-                if self.normalize:
-                    intensity = intensity / 255.0  # Нормализация в [0, 1]
-                feature_list.append(intensity.reshape(-1, 1))
+            # Для XYZ файлов добавляем нулевые признаки, чтобы сохранить размерность
+            if self.file_type == 'xyz':
+                # Добавляем нулевые признаки для совместимости с моделью
+                zeros_intensity = np.zeros((len(block_points), 1), dtype=np.float32)
+                zeros_return_num = np.zeros((len(block_points), 1), dtype=np.float32)
+                zeros_num_returns = np.zeros((len(block_points), 1), dtype=np.float32)
+                
+                feature_list.extend([zeros_intensity, zeros_return_num, zeros_num_returns])
             
-            # Return number
-            if 'return_number' in self.features:
-                return_num = self.features['return_number'][indices][choice]
-                feature_list.append(return_num.reshape(-1, 1))
+            # Для LAS файлов используем реальные признаки
+            elif self.file_type == 'las':
+                if 'intensity' in self.features:
+                    intensity = self.features['intensity'][indices][choice]
+                    if self.normalize:
+                        intensity = intensity / 255.0
+                    feature_list.append(intensity.reshape(-1, 1))
+                else:
+                    feature_list.append(np.zeros((len(block_points), 1), dtype=np.float32))
+                
+                if 'return_number' in self.features:
+                    return_num = self.features['return_number'][indices][choice]
+                    feature_list.append(return_num.reshape(-1, 1))
+                else:
+                    feature_list.append(np.zeros((len(block_points), 1), dtype=np.float32))
+                
+                if 'number_of_returns' in self.features:
+                    num_returns = self.features['number_of_returns'][indices][choice]
+                    feature_list.append(num_returns.reshape(-1, 1))
+                else:
+                    feature_list.append(np.zeros((len(block_points), 1), dtype=np.float32))
             
-            # Number of returns
-            if 'number_of_returns' in self.features:
-                num_returns = self.features['number_of_returns'][indices][choice]
-                feature_list.append(num_returns.reshape(-1, 1))
-            
+            # Объединяем признаки
             if feature_list:
                 features = np.concatenate(feature_list, axis=1)
                 block_points = np.concatenate([block_points, features], axis=1)
