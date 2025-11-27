@@ -1,7 +1,9 @@
 from datetime import datetime
 import json
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from typing import Optional
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from configs.settings import settings 
 from services.comparison_service import compare_xyz_files
 from services.dataset_stats_service import analyze_xyz_dataset
@@ -16,41 +18,53 @@ from services.management_service import (
 
 router = APIRouter()
 
+class TestConfig(BaseModel):
+    model_path: Optional[str] = None
+    dataset_path: Optional[str] = None
+    # Добавь другие поля конфига по необходимости
 
-@router.get("/model-architectures")
+@router.get("/model-architectures", 
+           summary="Получить архитектуры моделей",
+           description="Возвращает список доступных архитектур моделей (.py файлы)")
 async def list_model_architectures():
     """Получить список архитектур моделей (.py файлы)"""
     return get_model_architectures()
 
-@router.get("/trained-models")
+@router.get("/trained-models",
+           summary="Получить обученные модели",
+           description="Возвращает список обученных моделей (.pth файлы)")
 async def list_trained_models():
     """Получить список обученных моделей (.pth файлы)"""
     return get_trained_models()
 
-@router.get("/datasets")
-async def list_datasets(subdir: str = None):
+@router.get("/datasets",
+           summary="Получить датасеты",
+           description="Возвращает список датасетов")
+async def list_datasets(subdir: Optional[str] = Query(None, description="Поддиректория")):
     """Получить список датасетов"""
     return get_datasets_list(subdir=subdir)
 
 @router.websocket("/ws/test-model")
 async def websocket_test_model(websocket: WebSocket):
-    """Тестирование модели"""
+    """Тестирование модели через WebSocket"""
     await websocket_manager(websocket, test_model_with_logging, "test")
 
 @router.websocket("/ws/train-model")
 async def websocket_train_model(websocket: WebSocket):
-    """Заппуск обучения"""
+    """Обучение модели через WebSocket"""
     await websocket_manager(websocket, train_dgcnn_with_logging, "train")
 
 @router.websocket("/ws/predict")
 async def websocket_predict(websocket: WebSocket):
-    """Запуск распознавания"""
+    """Предсказание через WebSocket"""
     await websocket_manager(websocket, predict_with_logging, "predict")
 
-@router.get("/compare-xyz")
+@router.get("/compare-xyz",
+           summary="Сравнить XYZ файлы",
+           description="Сравнивает два XYZ файла: исходный и предсказанный")
 async def compare_xyz(
-    original_file: str,  # имя файла в DATASETS_DIR/raw/
-    predicted_file: str  # имя файла в DATASETS_DIR/predicted/
+    original_file: str = Query(..., description="Имя файла в DATASETS_DIR/raw/"),
+    predicted_file: str = Query(..., description="Имя файла в DATASETS_DIR/predicted/")
 ):
     """
     Сравнить два XYZ файла: исходный и предсказанный
@@ -68,16 +82,16 @@ async def compare_xyz(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
 
-@router.get("/dataset-stats")
-async def get_dataset_stats(file_path: str, subdir: str = "raw"):
+@router.get("/dataset-stats",
+           summary="Статистика датасета",
+           description="Получить статистику по классам в .xyz файле")
+async def get_dataset_stats(
+    file_path: str = Query(..., description="Имя файла (например, 'Univer2019_short.xyz')"),
+    subdir: str = Query("raw", description="Поддиректория (например, 'raw', 'predicted')")
+):
     """
     Получить статистику по классам в .xyz файле
-    
-    Args:
-        file_path: имя файла (например, 'Univer2019_short.xyz')
-        subdir: поддиректория (например, 'raw', 'predicted')
     """
     full_path = settings.DATASETS_DIR / subdir / file_path
     
@@ -90,36 +104,10 @@ async def get_dataset_stats(file_path: str, subdir: str = "raw"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# Роуты для HTML страниц
-@router.get("/")
+# Роуты для HTML страниц (если нужно оставить)
+@router.get("/", include_in_schema=False)
 async def root():
     return FileResponse("static/test_ws.html")
-
-@router.get("/models.html")
-async def models_page():
-    return FileResponse("static/models.html")
-
-@router.get("/datasets.html")
-async def datasets_page():
-    return FileResponse("static/datasets.html")
-
-@router.get("/train.html")
-async def train_page():
-    return FileResponse("static/train.html")
-
-@router.get("/test_ws.html")
-async def test_ws_page():
-    return FileResponse("static/test_ws.html")
-
-@router.get("/predict.html")
-async def predict_page():
-    return FileResponse("static/predict.html")
-
-@router.get("/compare.html")
-async def compare_page():
-    return FileResponse("static/compare.html")
-
 
 async def websocket_manager(websocket: WebSocket, service_func, session_type: str):
     """Универсальный менеджер WebSocket сессий"""
