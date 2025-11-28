@@ -34,6 +34,36 @@
         }
         .connected { background: #d4edda; color: #155724; }
         .disconnected { background: #f8d7da; color: #721c24; }
+        .dataset-selector { margin-bottom: 10px; }
+        .dataset-item { 
+            display: flex; 
+            align-items: center; 
+            padding: 8px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            margin-bottom: 5px; 
+            background: #f8f9fa;
+        }
+        .dataset-item input { width: auto; margin-right: 10px; }
+        .dataset-item label { margin: 0; font-weight: normal; flex-grow: 1; }
+        .stats-panel { 
+            margin-top: 20px; 
+            padding: 15px; 
+            background: #f8f9fa; 
+            border-radius: 5px; 
+            display: none;
+        }
+        .stats-header { 
+            font-weight: bold; 
+            margin-bottom: 10px; 
+            color: #333;
+        }
+        .stats-item { 
+            margin-bottom: 5px; 
+            padding: 5px; 
+            background: white; 
+            border-radius: 3px;
+        }
     </style>
 </head>
 <body>
@@ -59,10 +89,13 @@
             </div>
             
             <div class="form-group">
-                <label for="datasetSelect">Unlabeled датасет:</label>
-                <select id="datasetSelect">
-                    <option value="">Загрузка датасетов...</option>
-                </select>
+                <label>Unlabeled датасеты:</label>
+                <div id="datasetList" class="dataset-selector">
+                </div>
+                <div style="margin-top: 10px;">
+                    <button type="button" onclick="selectAllDatasets()">Выбрать все</button>
+                    <button type="button" onclick="deselectAllDatasets()">Снять все</button>
+                </div>
             </div>
             
             <div class="form-group">
@@ -77,12 +110,18 @@
             
             <button class="predict-btn" onclick="startPrediction()" id="predictBtn">🔮 Запустить предсказание</button>
             
+            <div class="stats-panel" id="statsPanel">
+                <div class="stats-header">📊 Агрегированная статистика:</div>
+                <div id="aggregatedStats"></div>
+            </div>
+            
             <div style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
                 <small>
                     <strong>💡 Примечание:</strong><br>
                     • Используется обученная модель<br>
                     • Обрабатываются unlabeled датасеты<br>
-                    • Результаты сохраняются в datasets/predicted/
+                    • Результаты сохраняются в datasets/predicted/<br>
+                    • <strong>Новое:</strong> поддержка множественных датасетов!
                 </small>
             </div>
         </div>
@@ -97,6 +136,7 @@
     <script>
     let ws = null;
     let isPredicting = false;
+    let availableDatasets = [];
 
     // Загрузка доступных моделей и датасетов
     async function loadData() {
@@ -120,25 +160,56 @@
             const datasetsResponse = await fetch('/api/datasets');
             const datasets = await datasetsResponse.json();
             
-            const datasetSelect = document.getElementById('datasetSelect');
-            datasetSelect.innerHTML = '<option value="">Выберите датасет...</option>';
-            
-            // ИСПРАВЛЕНИЕ: используем datasets.raw вместо datasets.unlabeled, если unlabeled не существует
+            // Заполняем список для множественного выбора
             const unlabeledDatasets = datasets.unlabeled || datasets.raw || [];
+            availableDatasets = unlabeledDatasets;
+            
+            const datasetList = document.getElementById('datasetList');
+            datasetList.innerHTML = '';
             
             unlabeledDatasets.forEach(ds => {
-                const option = document.createElement('option');
-                option.value = `datasets/raw/${ds.file}`; // Используем raw папку
-                option.textContent = `${ds.name} (${ds.points} точек)`;
-                datasetSelect.appendChild(option);
+                const item = document.createElement('div');
+                item.className = 'dataset-item';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.id = `dataset-${ds.file}`;
+                checkbox.value = `datasets/raw/${ds.file}`;
+                
+                const label = document.createElement('label');
+                label.htmlFor = `dataset-${ds.file}`;
+                label.textContent = `${ds.name} (${ds.points} точек)`;
+                
+                item.appendChild(checkbox);
+                item.appendChild(label);
+                datasetList.appendChild(item);
             });
             
         } catch (error) {
             console.error('Ошибка загрузки данных:', error);
-            // Показываем ошибку в интерфейсе
             document.getElementById('modelSelect').innerHTML = '<option value="">❌ Ошибка загрузки моделей</option>';
-            document.getElementById('datasetSelect').innerHTML = '<option value="">❌ Ошибка загрузки датасетов</option>';
+            document.getElementById('datasetList').innerHTML = '<div>❌ Ошибка загрузки датасетов</div>';
         }
+    }
+
+    // Выбрать все датасеты
+    function selectAllDatasets() {
+        document.querySelectorAll('#datasetList input[type="checkbox"]').forEach(checkbox => {
+            checkbox.checked = true;
+        });
+    }
+
+    // Снять все датасеты
+    function deselectAllDatasets() {
+        document.querySelectorAll('#datasetList input[type="checkbox"]').forEach(checkbox => {
+            checkbox.checked = false;
+        });
+    }
+
+    // Получить выбранные датасеты
+    function getSelectedDatasets() {
+        const checkboxes = document.querySelectorAll('#datasetList input[type="checkbox"]:checked');
+        return Array.from(checkboxes).map(cb => cb.value);
     }
 
     function startPrediction() {
@@ -149,7 +220,6 @@
 
         const config = {
             checkpoint_path: document.getElementById('modelSelect').value,
-            input_file: document.getElementById('datasetSelect').value,
             batch_size: parseInt(document.getElementById('batchSize').value),
             output_dir: document.getElementById('outputDir').value
         };
@@ -159,11 +229,25 @@
             return;
         }
 
-        if (!config.input_file) {
-            alert('Выберите датасет для предсказания!');
+        // Получаем выбранные датасеты
+        const inputFiles = getSelectedDatasets();
+        if (inputFiles.length === 0) {
+            alert('Выберите хотя бы один датасет для предсказания!');
             return;
         }
 
+        // Добавляем файлы в конфиг
+        if (inputFiles.length === 1) {
+            // Для одного файла используем input_file для обратной совместимости
+            config.input_file = inputFiles[0];
+        } else {
+            // Для нескольких файлов используем input_files
+            config.input_files = inputFiles;
+        }
+
+        // Скрываем статистику перед новым запуском
+        document.getElementById('statsPanel').style.display = 'none';
+        
         connectWebSocket(config);
     }
 
@@ -191,22 +275,14 @@
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'log') {
-                    // Добавляем только сообщение лога, без JSON
+                    // Логи
                     const logLine = document.createElement('div');
                     logLine.className = `log-${data.level}`;
                     logLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ${data.message}`;
                     logs.appendChild(logLine);
                 } else if (data.type === 'result') {
                     // Результат операции
-                    const resultLine = document.createElement('div');
-                    resultLine.className = 'log-info';
-                    resultLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ✅ Результат: ${data.data.message}`;
-                    logs.appendChild(resultLine);
-                    
-                    // Завершаем предсказание
-                    isPredicting = false;
-                    document.getElementById('predictBtn').disabled = false;
-                    document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+                    handleResult(data.data);
                 } else if (data.type === 'error') {
                     // Ошибка
                     const errorLine = document.createElement('div');
@@ -214,10 +290,7 @@
                     errorLine.textContent = `[${new Date(data.timestamp).toLocaleTimeString()}] ❌ ОШИБКА: ${data.data.error || data.data.message}`;
                     logs.appendChild(errorLine);
                     
-                    // Завершаем предсказание
-                    isPredicting = false;
-                    document.getElementById('predictBtn').disabled = false;
-                    document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+                    finishPrediction();
                 } else if (data.type === 'connection') {
                     // Сообщение о подключении
                     const connectionLine = document.createElement('div');
@@ -246,16 +319,126 @@
         ws.onclose = function() {
             status.className = 'status disconnected';
             status.textContent = '🔴 Соединение закрыто';
-            isPredicting = false;
-            document.getElementById('predictBtn').disabled = false;
-            document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+            finishPrediction();
         };
 
         ws.onerror = function(error) {
             status.className = 'status disconnected';
             status.textContent = '❌ Ошибка соединения';
             console.error('WebSocket error:', error);
+            finishPrediction();
         };
+    }
+
+    // Обработка результата предсказания
+    function handleResult(result) {
+        const resultLine = document.createElement('div');
+        resultLine.className = 'log-info';
+        
+        if (result.success) {
+            resultLine.textContent = `[${new Date().toLocaleTimeString()}] ✅ ${result.message}`;
+            logs.appendChild(resultLine);
+            
+            if (result.aggregated_statistics) {
+                showAggregatedStats(result);
+            } else if (result.statistics) {
+                showSingleStats(result);
+            }
+        } else {
+            resultLine.textContent = `[${new Date().toLocaleTimeString()}] ❌ ОШИБКА: ${result.message}`;
+            resultLine.className = 'log-error';
+            logs.appendChild(resultLine);
+        }
+        
+        finishPrediction();
+    }
+
+    // Показать статистику для одного датасета
+    function showSingleStats(result) {
+        const statsPanel = document.getElementById('statsPanel');
+        const statsContent = document.getElementById('aggregatedStats');
+        
+        statsContent.innerHTML = '<div class="stats-item">📊 Статистика предсказаний:</div>';
+        
+        // Правильное отображение статистики
+        if (result.statistics && typeof result.statistics === 'object') {
+            for (const [className, stat] of Object.entries(result.statistics)) {
+                const statItem = document.createElement('div');
+                statItem.className = 'stats-item';
+                if (typeof stat === 'object' && stat.formatted) {
+                    statItem.textContent = `   ${className}: ${stat.formatted}`;
+                } else if (typeof stat === 'string') {
+                    statItem.textContent = `   ${className}: ${stat}`;
+                } else {
+                    statItem.textContent = `   ${className}: ${JSON.stringify(stat)}`;
+                }
+                statsContent.appendChild(statItem);
+            }
+        } else {
+            const errorItem = document.createElement('div');
+            errorItem.className = 'stats-item';
+            errorItem.textContent = '❌ Нет данных статистики';
+            statsContent.appendChild(errorItem);
+        }
+        
+        statsPanel.style.display = 'block';
+    }
+
+    // Показать агрегированную статистику для нескольких датасетов
+    function showAggregatedStats(result) {
+        const statsPanel = document.getElementById('statsPanel');
+        const statsContent = document.getElementById('aggregatedStats');
+        
+        statsContent.innerHTML = `
+            <div class="stats-item">✅ Обработано датасетов: ${result.datasets_processed}</div>
+            <div class="stats-item">❌ Ошибок: ${result.datasets_failed}</div>
+            <div class="stats-item">📊 Всего точек: ${result.total_points.toLocaleString()}</div>
+            <div class="stats-item" style="margin-top: 10px; font-weight: bold;">Распределение по классам:</div>
+        `;
+        
+        // Правильное отображение агрегированной статистики
+        if (result.aggregated_statistics && typeof result.aggregated_statistics === 'object') {
+            for (const [className, stat] of Object.entries(result.aggregated_statistics)) {
+                const statItem = document.createElement('div');
+                statItem.className = 'stats-item';
+                statItem.textContent = `   ${className}: ${stat}`;
+                statsContent.appendChild(statItem);
+            }
+        }
+        
+        // Показываем детали по каждому датасету
+        if (result.individual_results) {
+            const detailsItem = document.createElement('div');
+            detailsItem.className = 'stats-item';
+            detailsItem.style.marginTop = '10px';
+            detailsItem.innerHTML = '<strong>Детали по датасетам:</strong>';
+            statsContent.appendChild(detailsItem);
+            
+            result.individual_results.forEach(dataset => {
+                const datasetItem = document.createElement('div');
+                datasetItem.className = 'stats-item';
+                datasetItem.style.paddingLeft = '20px';
+                datasetItem.style.fontSize = '11px';
+                
+                if (dataset.success) {
+                    const filename = dataset.input_file.split('/').pop();
+                    datasetItem.textContent = `✓ ${filename}: ${dataset.total_points} точек`;
+                } else {
+                    datasetItem.textContent = `✗ ${dataset.input_file}: Ошибка`;
+                    datasetItem.style.color = '#dc3545';
+                }
+                statsContent.appendChild(datasetItem);
+            });
+        }
+        
+        statsPanel.style.display = 'block';
+    }
+
+    // Завершение предсказания
+    function finishPrediction() {
+        isPredicting = false;
+        document.getElementById('predictBtn').disabled = false;
+        document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
     }
 
     // Загружаем данные при открытии страницы

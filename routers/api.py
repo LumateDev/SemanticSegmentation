@@ -56,7 +56,7 @@ async def websocket_train_model(websocket: WebSocket):
 
 @router.websocket("/ws/predict")
 async def websocket_predict(websocket: WebSocket):
-    """Предсказание через WebSocket"""
+    """Предсказание через WebSocket (поддержка одного или нескольких датасетов)"""
     await websocket_manager(websocket, predict_with_logging, "predict")
 
 @router.get("/compare-xyz",
