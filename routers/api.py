@@ -104,10 +104,34 @@ async def get_dataset_stats(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Роуты для HTML страниц (если нужно оставить)
+# Роуты для HTML страниц
 @router.get("/", include_in_schema=False)
 async def root():
     return FileResponse("static/test_ws.html")
+
+@router.get("/models.html")
+async def models_page():
+    return FileResponse("static/models.html")
+
+@router.get("/datasets.html")
+async def datasets_page():
+    return FileResponse("static/datasets.html")
+
+@router.get("/train.html")
+async def train_page():
+    return FileResponse("static/train.html")
+
+@router.get("/test_ws.html")
+async def test_ws_page():
+    return FileResponse("static/test_ws.html")
+
+@router.get("/predict.html")
+async def predict_page():
+    return FileResponse("static/predict.html")
+
+@router.get("/compare.html")
+async def compare_page():
+    return FileResponse("static/compare.html")
 
 async def websocket_manager(websocket: WebSocket, service_func, session_type: str):
     """Универсальный менеджер WebSocket сессий"""
