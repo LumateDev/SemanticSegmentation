@@ -8,7 +8,7 @@ from fastapi import WebSocket
 from configs.settings import settings
 from models.modelDGCNN import DGCNN_LiDAR
 from utils.logger import get_logger, cleanup_websocket, send_result_to_websocket
-from utils.xyz_loader import indices_to_labels, load_xyz_no_labels, save_xyz_with_labels
+from utils.xyz_loader import indices_to_labels, load_xyz_no_labels, save_xyz_with_labels, load_xyz_with_labels
 from datetime import datetime
 
 
@@ -110,6 +110,15 @@ async def predict_with_logging(ws: WebSocket, config: dict):
         aggregated_stats = {}
         total_points_all = 0
         
+        # Для вычисления точности
+        accuracy_data = {
+            'total_correct': 0,
+            'total_points': 0,
+            'class_correct': {},
+            'class_total': {},
+            'per_dataset_accuracy': []
+        }
+        
         # Обрабатываем каждый датасет
         for i, input_file in enumerate(predict_config['input_files']):
             logger.info(f"📂 Обработка датасета {i+1}/{len(predict_config['input_files'])}: {Path(input_file).name}")
@@ -159,6 +168,33 @@ async def predict_with_logging(ws: WebSocket, config: dict):
                         aggregated_stats[class_name] = 0
                     aggregated_stats[class_name] += count
                 
+                # Вычисляем точность для датасета
+                dataset_accuracy = await calculate_dataset_accuracy(input_file, output_file, logger)
+                accuracy_info = None
+                
+                if dataset_accuracy:
+                    # Агрегируем данные точности
+                    accuracy_data['total_correct'] += dataset_accuracy['total_correct']
+                    accuracy_data['total_points'] += dataset_accuracy['total_points']
+                    
+                    for class_name, class_acc in dataset_accuracy['class_accuracy'].items():
+                        if class_name not in accuracy_data['class_correct']:
+                            accuracy_data['class_correct'][class_name] = 0
+                            accuracy_data['class_total'][class_name] = 0
+                        accuracy_data['class_correct'][class_name] += class_acc['correct']
+                        accuracy_data['class_total'][class_name] += class_acc['total']
+                    
+                    accuracy_data['per_dataset_accuracy'].append({
+                        'file': Path(input_file).name,
+                        'accuracy': dataset_accuracy['overall_accuracy'],
+                        'total_points': dataset_accuracy['total_points']
+                    })
+                    
+                    accuracy_info = {
+                        "overall": f"{dataset_accuracy['overall_accuracy']:.2f}%",
+                        "per_class": {k: f"{v['accuracy']:.2f}%" for k, v in dataset_accuracy['class_accuracy'].items()}
+                    }
+                
                 # Результат для текущего датасета
                 dataset_result = {
                     "input_file": input_file,
@@ -167,6 +203,11 @@ async def predict_with_logging(ws: WebSocket, config: dict):
                     "total_points": total_points,
                     "success": True
                 }
+                
+                # Добавляем точность если вычислена
+                if accuracy_info:
+                    dataset_result["accuracy"] = accuracy_info
+                
                 all_results.append(dataset_result)
                 
                 logger.info(f"✅ Датсет {Path(input_file).name} обработан успешно")
@@ -182,6 +223,31 @@ async def predict_with_logging(ws: WebSocket, config: dict):
                 }
                 all_results.append(dataset_result)
         
+        # Вычисляем общую точность
+        overall_accuracy_info = None
+        if accuracy_data['total_points'] > 0:
+            overall_accuracy = 100.0 * accuracy_data['total_correct'] / accuracy_data['total_points']
+            
+            # Вычисляем точность по классам
+            class_accuracy = {}
+            for class_name in accuracy_data['class_correct']:
+                if accuracy_data['class_total'][class_name] > 0:
+                    class_acc = 100.0 * accuracy_data['class_correct'][class_name] / accuracy_data['class_total'][class_name]
+                    class_accuracy[class_name] = f"{class_acc:.2f}%"
+                else:
+                    class_accuracy[class_name] = "N/A"
+            
+            overall_accuracy_info = {
+                "overall": f"{overall_accuracy:.2f}%",
+                "per_class": class_accuracy,
+                "per_dataset": accuracy_data['per_dataset_accuracy']
+            }
+            
+            logger.info(f"🎯 ОБЩАЯ ТОЧНОСТЬ: {overall_accuracy:.2f}%")
+            logger.info("🎯 Точность по классам:")
+            for class_name, acc in class_accuracy.items():
+                logger.info(f"   {class_name}: {acc}")
+        
         # Формируем финальный результат в зависимости от режима
         if single_file_mode:
             # Режим одного файла - возвращаем простой результат для обратной совместимости
@@ -192,6 +258,9 @@ async def predict_with_logging(ws: WebSocket, config: dict):
                     "message": f"✅ Предсказание завершено! Результат сохранен: {result['output_file']}",
                     "session_id": logger.session_id
                 })
+                # Добавляем общую точность если вычислена
+                if overall_accuracy_info:
+                    result["accuracy"] = overall_accuracy_info
             else:
                 result = {
                     "success": False,
@@ -219,6 +288,10 @@ async def predict_with_logging(ws: WebSocket, config: dict):
                 "aggregated_statistics": aggregated_formatted,
                 "session_id": logger.session_id
             }
+            
+            # Добавляем общую точность если вычислена
+            if overall_accuracy_info:
+                result["accuracy"] = overall_accuracy_info
         
         await send_result_to_websocket(ws, result)
         return result
@@ -243,6 +316,66 @@ async def predict_with_logging(ws: WebSocket, config: dict):
     finally:
         cleanup_websocket(logger.session_id)
         await asyncio.sleep(0.1)
+
+
+async def calculate_dataset_accuracy(input_file_path, predicted_file_path, logger):
+    """
+    Вычисление точности для одного датасета путем сравнения с истинными метками
+    """
+    try:
+       
+        input_path = Path(input_file_path)
+        true_labels_path = settings.DATASETS_DIR / "raw" / input_path.name
+        
+        if not true_labels_path.exists():
+            logger.warning(f"⚠️ Файл с истинными метками не найден: {true_labels_path}")
+            return None
+        
+        # Загружаем истинные метки
+        true_xyz, true_labels = load_xyz_with_labels(true_labels_path)
+        
+        # Загружаем предсказанные метки
+        pred_xyz, pred_labels = load_xyz_with_labels(Path(predicted_file_path))
+        
+        # Проверяем соответствие количества точек
+        if len(true_labels) != len(pred_labels):
+            logger.warning(f"⚠️ Несовпадение количества точек: истинные {len(true_labels)}, предсказанные {len(pred_labels)}")
+            return None
+        
+        # Вычисляем точность
+        correct_predictions = np.sum(true_labels == pred_labels)
+        total_points = len(true_labels)
+        overall_accuracy = 100.0 * correct_predictions / total_points
+        
+        # Вычисляем точность по классам
+        class_accuracy = {}
+        unique_classes = np.unique(true_labels)
+        
+        for cls in unique_classes:
+            class_mask = true_labels == cls
+            class_total = np.sum(class_mask)
+            if class_total > 0:
+                class_correct = np.sum((true_labels == cls) & (pred_labels == cls))
+                class_acc = 100.0 * class_correct / class_total
+                class_name = settings.CLASS_MAPPING.get(int(cls), f'Class {cls}')
+                class_accuracy[class_name] = {
+                    'correct': class_correct,
+                    'total': class_total,
+                    'accuracy': class_acc
+                }
+        
+        logger.info(f"📊 Точность для {input_path.name}: {overall_accuracy:.2f}%")
+        
+        return {
+            'overall_accuracy': overall_accuracy,
+            'total_correct': correct_predictions,
+            'total_points': total_points,
+            'class_accuracy': class_accuracy
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка при вычислении точности: {str(e)}")
+        return None
 
 
 async def load_model(checkpoint_path, device, logger):

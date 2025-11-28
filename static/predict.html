@@ -381,10 +381,29 @@
             statsContent.appendChild(errorItem);
         }
         
+        // Добавляем точность
+        if (result.accuracy) {
+            statsContent.innerHTML += `
+                <div class="stats-item" style="margin-top: 10px; font-weight: bold; color: #28a745;">
+                    🎯 Общая точность: ${result.accuracy.overall}
+                </div>
+                <div class="stats-item" style="font-weight: bold;">Точность по классам:</div>
+            `;
+            
+            if (result.accuracy.per_class) {
+                for (const [className, accuracy] of Object.entries(result.accuracy.per_class)) {
+                    const accuracyItem = document.createElement('div');
+                    accuracyItem.className = 'stats-item';
+                    accuracyItem.textContent = `   ${className}: ${accuracy}`;
+                    statsContent.appendChild(accuracyItem);
+                }
+            }
+        }
+        
         statsPanel.style.display = 'block';
     }
 
-    // Показать агрегированную статистику для нескольких датасетов
+        // Показать агрегированную статистику для нескольких датасетов
     function showAggregatedStats(result) {
         const statsPanel = document.getElementById('statsPanel');
         const statsContent = document.getElementById('aggregatedStats');
@@ -393,8 +412,28 @@
             <div class="stats-item">✅ Обработано датасетов: ${result.datasets_processed}</div>
             <div class="stats-item">❌ Ошибок: ${result.datasets_failed}</div>
             <div class="stats-item">📊 Всего точек: ${result.total_points.toLocaleString()}</div>
-            <div class="stats-item" style="margin-top: 10px; font-weight: bold;">Распределение по классам:</div>
         `;
+        
+        // Добавляем точность если есть
+        if (result.accuracy) {
+            statsContent.innerHTML += `
+                <div class="stats-item" style="margin-top: 10px; font-weight: bold; color: #28a745;">
+                    🎯 Общая точность: ${result.accuracy.overall}
+                </div>
+                <div class="stats-item" style="font-weight: bold;">Точность по классам:</div>
+            `;
+            
+            if (result.accuracy.per_class) {
+                for (const [className, accuracy] of Object.entries(result.accuracy.per_class)) {
+                    const accuracyItem = document.createElement('div');
+                    accuracyItem.className = 'stats-item';
+                    accuracyItem.textContent = `   ${className}: ${accuracy}`;
+                    statsContent.appendChild(accuracyItem);
+                }
+            }
+        }
+        
+        statsContent.innerHTML += `<div class="stats-item" style="margin-top: 10px; font-weight: bold;">Распределение по классам:</div>`;
         
         // Правильное отображение агрегированной статистики
         if (result.aggregated_statistics && typeof result.aggregated_statistics === 'object') {
@@ -422,7 +461,11 @@
                 
                 if (dataset.success) {
                     const filename = dataset.input_file.split('/').pop();
-                    datasetItem.textContent = `✓ ${filename}: ${dataset.total_points} точек`;
+                    let accuracyText = '';
+                    if (dataset.accuracy) {
+                        accuracyText = ` - Точность: ${dataset.accuracy.overall}`;
+                    }
+                    datasetItem.textContent = `✓ ${filename}: ${dataset.total_points} точек${accuracyText}`;
                 } else {
                     datasetItem.textContent = `✗ ${dataset.input_file}: Ошибка`;
                     datasetItem.style.color = '#dc3545';
