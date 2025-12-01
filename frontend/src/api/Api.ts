@@ -1,13 +1,14 @@
 import { apiClient } from '@/api/apiClient';
+import type { ModelArchitecture, TrainedModel } from './apiTypes';
 
 export const Api = {
   // Получить архитектуры моделей
-  getModelArchitectures: () => {
+  getModelArchitectures: (): Promise<ModelArchitecture[]> => {
     return apiClient.get('/api/model-architectures');
   },
 
   // Получить обученные модели
-  getTrainedModels: () => {
+  getTrainedModels: (): Promise<TrainedModel[]> => {
     return apiClient.get('/api/trained-models');
   },
 
