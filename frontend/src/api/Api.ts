@@ -1,40 +1,36 @@
 import { apiClient } from '@/api/apiClient';
-import type { ModelArchitecture, TrainedModel } from './apiTypes';
+import type {
+  ModelArchitecture,
+  TrainedModel,
+  DatasetsRootResponse,
+  DatasetsSubdirResponse,
+  DatasetStats,
+} from './apiTypes';
 
 export const Api = {
-  // Получить архитектуры моделей
+  // ===== Модели =====
   getModelArchitectures: (): Promise<ModelArchitecture[]> => {
     return apiClient.get('/api/model-architectures');
   },
 
-  // Получить обученные модели
   getTrainedModels: (): Promise<TrainedModel[]> => {
     return apiClient.get('/api/trained-models');
   },
 
-  // Получить датасеты
-  getDatasets: (subdir?: string) => {
-    const params = subdir ? { subdir } : {};
-    return apiClient.get('/api/datasets', { params });
+  // ===== Датасеты =====
+  // Без subdir возвращает { "raw": [...], "predicted": [...] }
+  getDatasetsRoot: (): Promise<DatasetsRootResponse> => {
+    return apiClient.get('/api/datasets');
   },
 
-  // Сравнить XYZ файлы
-  compareXYZ: (originalFile: string, predictedFile: string) => {
-    return apiClient.get('/api/compare-xyz', {
-      params: {
-        original_file: originalFile,
-        predicted_file: predictedFile,
-      },
-    });
+  // С subdir возвращает массив файлов
+  getDatasetsSubdir: (subdir: string): Promise<DatasetsSubdirResponse> => {
+    return apiClient.get('/api/datasets', { params: { subdir } });
   },
 
-  // Получить статистику датасета
-  getDatasetStats: (filePath: string, subdir: string = 'raw') => {
+  getDatasetStats: (filePath: string, subdir: string = 'raw'): Promise<DatasetStats> => {
     return apiClient.get('/api/dataset-stats', {
-      params: {
-        file_path: filePath,
-        subdir,
-      },
+      params: { file_path: filePath, subdir },
     });
   },
 };
