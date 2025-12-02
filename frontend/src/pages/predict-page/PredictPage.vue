@@ -1,613 +1,880 @@
-```vue
 <template>
   <div class="predict-page">
-    <h1>🔮 Предсказание DGCNN модели</h1>
+    <div class="predict-page__header">
+      <el-icon size="32" color="var(--el-color-primary)">
+        <MagicStick />
+      </el-icon>
+      <h1 class="predict-page__title">🔮 Предсказание DGCNN модели</h1>
+      <div class="predict-page__subtitle">
+        Выберите модель и датасеты для предсказания
+      </div>
+    </div>
     
-    <div class="predict-container">
-      <div class="config-panel">
-        <h3>⚙️ Конфигурация предсказания</h3>
+    <div class="predict-page__container">
+      <!-- Конфигурационная панель -->
+      <el-card class="predict-page__config-panel" shadow="never">
+        <template #header>
+          <div class="predict-page__panel-header">
+            <el-icon><Setting /></el-icon>
+            <h3>⚙️ Конфигурация предсказания</h3>
+          </div>
+        </template>
         
-        <div class="form-group">
-          <label for="modelSelect">Модель:</label>
-          <select id="modelSelect" v-model="selectedModel">
-            <option value="">Загрузка моделей...</option>
-            <option 
-              v-for="(model, index) in trainedModels" 
-              :key="index"
-              :value="model.full_path"
+        <el-form label-width="180px" label-position="left" size="small">
+          <!-- Выбор модели -->
+          <el-form-item label="Модель:" required>
+            <el-select
+              v-model="selectedModel"
+              placeholder="Выберите модель..."
+              filterable
+              clearable
+              style="width: 100%"
+              :loading="loadingModels"
             >
-              {{ model.display_name || model.folder }} ({{ model.size }})
-            </option>
-          </select>
-        </div>
-        
-        <div class="form-group">
-          <label>Unlabeled датасеты:</label>
-          <div id="datasetList" class="dataset-selector">
-            <div v-if="loadingDatasets">Загрузка датасетов...</div>
-            <div v-else-if="availableDatasets.length === 0">
-              <p>Нет доступных датасетов.</p>
-            </div>
-            <div v-else>
-              <div 
-                v-for="(dataset, index) in availableDatasets" 
-                :key="index" 
-                class="dataset-item"
+              <el-option
+                v-for="(model, index) in trainedModels"
+                :key="index"
+                :label="`${model.display_name || model.folder} (${model.size})`"
+                :value="model.full_path"
               >
-                <input 
-                  type="checkbox" 
-                  :id="`dataset-${dataset.file}`"
-                  :value="`datasets/raw/${dataset.file}`"
-                  v-model="selectedDatasets"
-                >
-                <label :for="`dataset-${dataset.file}`">
-                  {{ dataset.name }} ({{ dataset.points }} точек)
-                </label>
+                <div class="model-option">
+                  <el-icon size="16" color="var(--el-color-success)">
+                    <Check />
+                  </el-icon>
+                  <span class="model-name">{{ model.display_name || model.folder }}</span>
+                  <span class="model-size">{{ model.size }}</span>
+                </div>
+              </el-option>
+              
+              <el-option v-if="trainedModels.length === 0" disabled value="">
+                <div class="no-models">
+                  <el-icon><Warning /></el-icon>
+                  <span>Нет обученных моделей</span>
+                </div>
+              </el-option>
+            </el-select>
+          </el-form-item>
+          
+          <!-- Выбор датасетов -->
+          <el-form-item label="Unlabeled датасеты:" required>
+            <div class="datasets-selector">
+              <div v-if="loadingDatasets" class="datasets-loading">
+                <el-skeleton :rows="3" animated />
+              </div>
+              
+              <div v-else-if="availableDatasets.length === 0" class="datasets-empty">
+                <el-empty description="Нет доступных датасетов" :image-size="60" />
+              </div>
+              
+              <div v-else class="datasets-list">
+                <el-checkbox-group v-model="selectedDatasets">
+                  <el-card
+                    v-for="(dataset, index) in availableDatasets"
+                    :key="index"
+                    class="dataset-card"
+                    shadow="never"
+                  >
+                    <el-checkbox :label="`datasets/raw/${dataset.file}`">
+                      <div class="dataset-info">
+                        <div class="dataset-header">
+                          <span class="dataset-name">{{ dataset.name }}</span>
+                          <el-tag size="small" type="info" effect="plain">
+                            {{ dataset.points.toLocaleString() }} точек
+                          </el-tag>
+                        </div>
+                        <div class="dataset-meta">
+                          <span class="dataset-file">{{ dataset.file }}</span>
+                          <span class="dataset-size">{{ dataset.size }}</span>
+                        </div>
+                      </div>
+                    </el-checkbox>
+                  </el-card>
+                </el-checkbox-group>
+                
+                <div class="datasets-actions">
+                  <el-button type="text" size="small" @click="selectAllDatasets">
+                    <el-icon><Select /></el-icon>
+                    Выбрать все
+                  </el-button>
+                  <el-button type="text" size="small" @click="deselectAllDatasets">
+                    <el-icon><CircleClose /></el-icon>
+                    Снять все
+                  </el-button>
+                </div>
               </div>
             </div>
-          </div>
-          <div style="margin-top: 10px;">
-            <button type="button" @click="selectAllDatasets">Выбрать все</button>
-            <button type="button" @click="deselectAllDatasets">Снять все</button>
-          </div>
-        </div>
+          </el-form-item>
+          
+          <!-- Параметры предсказания -->
+          <el-form-item label="Batch Size:" required>
+            <el-input-number
+              v-model="config.batch_size"
+              :min="1"
+              :max="32"
+              :step="1"
+              controls-position="right"
+              style="width: 100%"
+            />
+          </el-form-item>
+          
+          <el-form-item label="Выходная папка:">
+            <el-input
+              v-model="outputDir"
+              readonly
+              placeholder="datasets/predicted"
+            >
+              <template #prepend>
+                <el-icon><Folder /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
+        </el-form>
         
-        <div class="form-group">
-          <label for="batchSize">Batch Size:</label>
-          <input 
-            type="number" 
-            id="batchSize" 
-            v-model.number="config.batch_size"
-            min="1" 
-            max="32"
+        <!-- Кнопка запуска -->
+        <div class="predict-page__actions">
+          <el-button
+            type="primary"
+            :loading="isPredicting"
+            :disabled="!selectedModel || selectedDatasets.length === 0 || loadingDatasets || loadingModels"
+            @click="startPrediction"
+            class="predict-page__predict-btn"
+            size="large"
           >
+            <template #icon>
+              <el-icon><MagicStick /></el-icon>
+            </template>
+            {{ isPredicting ? 'Идет предсказание...' : '🔮 Запустить предсказание' }}
+          </el-button>
         </div>
         
-        <div class="form-group">
-          <label for="outputDir">Выходная папка:</label>
-          <input type="text" id="outputDir" value="datasets/predicted" readonly>
-        </div>
+        <!-- Статистика -->
+        <el-collapse v-model="activeStats" class="predict-page__stats-collapse">
+          <el-collapse-item title="📊 Агрегированная статистика" name="stats">
+            <div v-html="statsContent" class="stats-content"></div>
+          </el-collapse-item>
+        </el-collapse>
         
-        <button 
-          class="predict-btn" 
-          @click="startPrediction" 
-          :disabled="isPredicting || loadingModels || loadingDatasets"
-          id="predictBtn"
+        <!-- Информационная панель -->
+        <el-alert
+          title="💡 Примечание"
+          type="info"
+          :closable="false"
+          class="predict-page__info-box"
         >
-          {{ isPredicting ? '🔮 Предсказание...' : '🔮 Запустить предсказание' }}
-        </button>
-        
-        <div class="stats-panel" id="statsPanel" v-show="showStats">
-          <div class="stats-header">📊 Агрегированная статистика:</div>
-          <div id="aggregatedStats" v-html="statsContent"></div>
-        </div>
-        
-        <div class="info-box">
-          <small>
-            <strong>💡 Примечание:</strong><br>
-            • Используется обученная модель<br>
-            • Обрабатываются unlabeled датасеты<br>
-            • Результаты сохраняются в datasets/predicted/<br>
-            • <strong>Новое:</strong> поддержка множественных датасетов!
-          </small>
-        </div>
-      </div>
+          <template #default>
+            <ul class="predict-page__info-list">
+              <li>Используется обученная модель</li>
+              <li>Обрабатываются unlabeled датасеты</li>
+              <li>Результаты сохраняются в <strong>datasets/predicted/</strong></li>
+              <li><strong>Новое:</strong> поддержка множественных датасетов!</li>
+            </ul>
+          </template>
+        </el-alert>
+      </el-card>
       
-      <div class="logs-panel">
-        <h3>📊 Логи предсказания</h3>
-        <div 
-          id="status" 
-          class="status" 
-          :class="{
-            'connected': wsConnected,
-            'disconnected': !wsConnected
-          }"
-        >
-          {{ statusMessage }}
+      <!-- Панель логов -->
+      <el-card class="predict-page__logs-panel" shadow="never">
+        <template #header>
+          <div class="predict-page__panel-header">
+            <el-icon><Monitor /></el-icon>
+            <h3>📊 Логи предсказания</h3>
+          </div>
+        </template>
+        
+        <!-- Статус подключения -->
+        <div class="predict-page__status">
+          <el-alert
+            :title="statusMessage"
+            :type="wsConnected ? 'success' : isPredicting ? 'warning' : 'error'"
+            :closable="false"
+            :show-icon="true"
+            :icon="getStatusIcon()"
+            class="predict-page__status-alert"
+          />
         </div>
-        <pre id="logs">{{ logs }}</pre>
-      </div>
+        
+        <!-- Логи -->
+        <div class="predict-page__logs-container">
+          <el-scrollbar height="500px">
+            <pre class="predict-page__logs-content">{{ logs }}</pre>
+          </el-scrollbar>
+          
+          <div v-if="!logs" class="predict-page__logs-empty">
+            <el-empty description="Логи предсказания появятся здесь" :image-size="80" />
+          </div>
+        </div>
+        
+        <!-- Действия с логами -->
+        <div class="predict-page__logs-actions">
+          <el-button-group>
+            <el-button
+              type="primary"
+              :icon="Download"
+              size="small"
+              @click="downloadLogs"
+              :disabled="!logs"
+            >
+              Скачать логи
+            </el-button>
+            <el-button
+              type="info"
+              :icon="Delete"
+              size="small"
+              @click="clearLogs"
+              :disabled="!logs"
+            >
+              Очистить
+            </el-button>
+          </el-button-group>
+        </div>
+      </el-card>
     </div>
   </div>
 </template>
 
-<script>
-export default {
-  name: 'PredictPage',
-  data() {
-    return {
-      ws: null,
-      isPredicting: false,
-      wsConnected: false,
-      loadingModels: true,
-      loadingDatasets: true,
-      statusMessage: '🔴 Ожидание подключения',
-      logs: '',
-      selectedModel: '',
-      selectedDatasets: [],
-      availableDatasets: [],
-      trainedModels: [],
-      showStats: false,
-      statsContent: '',
-      config: {
-        batch_size: 16
-      }
-    }
-  },
-  async created() {
-    await Promise.all([
-      this.loadModels(),
-      this.loadDatasets()
+<script setup>
+import { ref, computed, onMounted, onUnmounted } from 'vue';
+import {
+  MagicStick,
+  Setting,
+  Check,
+  Folder,
+  Monitor,
+  Download,
+  Delete,
+  Warning,
+  Select,
+  CircleClose
+} from '@element-plus/icons-vue';
+import { ElMessage, ElNotification } from 'element-plus';
+
+const ws = ref(null);
+const isPredicting = ref(false);
+const wsConnected = ref(false);
+const loadingModels = ref(true);
+const loadingDatasets = ref(true);
+const statusMessage = ref('🔴 Ожидание подключения');
+const logs = ref('');
+const selectedModel = ref('');
+const selectedDatasets = ref([]);
+const availableDatasets = ref([]);
+const trainedModels = ref([]);
+const activeStats = ref([]);
+const statsContent = ref('');
+const outputDir = ref('datasets/predicted');
+const config = ref({
+  batch_size: 16
+});
+
+// Иконки статуса
+const getStatusIcon = () => {
+  if (wsConnected.value) return 'success';
+  if (isPredicting.value) return 'warning';
+  return 'error';
+};
+
+// Выбрать все датасеты
+const selectAllDatasets = () => {
+  selectedDatasets.value = availableDatasets.value.map(ds => `datasets/raw/${ds.file}`);
+  ElMessage.success(`Выбрано ${selectedDatasets.value.length} датасетов`);
+};
+
+// Снять все датасеты
+const deselectAllDatasets = () => {
+  selectedDatasets.value = [];
+  ElMessage.info('Выбор датасетов сброшен');
+};
+
+// Загрузка данных
+const loadData = async () => {
+  try {
+    const [modelsRes, datasetsRes] = await Promise.all([
+      fetch('/api/trained-models'),
+      fetch('/api/datasets?subdir=raw') // Исправленный запрос
     ]);
-  },
-  beforeUnmount() {
-    this.closeWebSocket();
-  },
-  methods: {
-    async loadModels() {
-      try {
-        const response = await fetch('/api/trained-models');
-        this.trainedModels = await response.json();
-      } catch (error) {
-        console.error('Ошибка загрузки моделей:', error);
-      } finally {
-        this.loadingModels = false;
-      }
-    },
+    
+    const modelsData = await modelsRes.json();
+    const datasetsData = await datasetsRes.json();
+    
+    trainedModels.value = modelsData;
+    availableDatasets.value = datasetsData.files || datasetsData.raw || [];
+  } catch (error) {
+    console.error('Ошибка загрузки данных:', error);
+    ElMessage.error('Не удалось загрузить данные');
+  } finally {
+    loadingModels.value = false;
+    loadingDatasets.value = false;
+  }
+};
 
-    async loadDatasets() {
-      try {
-        const response = await fetch('/api/datasets');
-        const datasets = await response.json();
-        this.availableDatasets = datasets.unlabeled || datasets.raw || [];
-      } catch (error) {
-        console.error('Ошибка загрузки датасетов:', error);
-      } finally {
-        this.loadingDatasets = false;
-      }
-    },
+// Запуск предсказания
+const startPrediction = () => {
+  if (isPredicting.value) {
+    ElMessage.warning('Предсказание уже запущено!');
+    return;
+  }
 
-    selectAllDatasets() {
-      this.selectedDatasets = this.availableDatasets.map(ds => `datasets/raw/${ds.file}`);
-    },
+  if (!selectedModel.value) {
+    ElMessage.warning('Выберите модель для предсказания!');
+    return;
+  }
 
-    deselectAllDatasets() {
-      this.selectedDatasets = [];
-    },
+  if (selectedDatasets.value.length === 0) {
+    ElMessage.warning('Выберите хотя бы один датасет для предсказания!');
+    return;
+  }
 
-    startPrediction() {
-      if (this.isPredicting) {
-        alert('Предсказание уже запущено!');
-        return;
-      }
+  const predictionConfig = {
+    checkpoint_path: selectedModel.value,
+    batch_size: config.value.batch_size,
+    output_dir: outputDir.value
+  };
 
-      if (!this.selectedModel) {
-        alert('Выберите модель для предсказания!');
-        return;
-      }
+  if (selectedDatasets.value.length === 1) {
+    predictionConfig.input_file = selectedDatasets.value[0];
+  } else {
+    predictionConfig.input_files = selectedDatasets.value;
+  }
 
-      if (this.selectedDatasets.length === 0) {
-        alert('Выберите хотя бы один датасет для предсказания!');
-        return;
-      }
+  activeStats.value = [];
+  connectWebSocket(predictionConfig);
+};
 
-      const config = {
-        checkpoint_path: this.selectedModel,
-        batch_size: this.config.batch_size,
-        output_dir: 'datasets/predicted'
-      };
+// WebSocket соединение
+const connectWebSocket = (config) => {
+  statusMessage.value = '🟡 Подключаемся к WebSocket...';
+  wsConnected.value = false;
+  logs.value = '';
 
-      if (this.selectedDatasets.length === 1) {
-        config.input_file = this.selectedDatasets[0];
+  ws.value = new WebSocket("ws://127.0.0.1:8000/api/ws/predict");
+
+  ws.value.onopen = () => {
+    statusMessage.value = '🟢 WebSocket подключён — запуск предсказания...';
+    wsConnected.value = true;
+    isPredicting.value = true;
+    
+    ws.value.send(JSON.stringify(config));
+  };
+
+  ws.value.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      handleWebSocketMessage(data);
+    } catch (error) {
+      appendLog(`[${new Date().toLocaleTimeString()}] ${event.data}`, 'info');
+    }
+  };
+
+  ws.value.onclose = () => {
+    statusMessage.value = '🔴 Соединение закрыто';
+    wsConnected.value = false;
+    isPredicting.value = false;
+  };
+
+  ws.value.onerror = (error) => {
+    statusMessage.value = '❌ Ошибка соединения';
+    wsConnected.value = false;
+    console.error('WebSocket error:', error);
+    ElMessage.error('Ошибка подключения к серверу');
+  };
+};
+
+// Обработка сообщений WebSocket
+const handleWebSocketMessage = (data) => {
+  const timestamp = new Date().toLocaleTimeString();
+
+  switch (data.type) {
+    case 'log':
+      appendLog(`[${timestamp}] ${data.message}`, data.level);
+      break;
+    case 'result':
+      handleResult(data.data);
+      break;
+    case 'error':
+      appendLog(`[${timestamp}] ❌ ОШИБКА: ${data.data.error || data.data.message}`, 'error');
+      ElNotification.error({
+        title: 'Ошибка предсказания',
+        message: data.data.error || data.data.message,
+        duration: 5000
+      });
+      isPredicting.value = false;
+      break;
+    case 'connection':
+      appendLog(`[${timestamp}] 🔗 ${data.message}`, 'info');
+      break;
+    default:
+      appendLog(`[${timestamp}] ${JSON.stringify(data)}`, 'info');
+  }
+};
+
+// Обработка результата
+const handleResult = (result) => {
+  if (result.success) {
+    appendLog(`[${new Date().toLocaleTimeString()}] ✅ ${result.message}`, 'info');
+    ElNotification.success({
+      title: 'Предсказание завершено',
+      message: result.message,
+      duration: 5000
+    });
+    
+    if (result.aggregated_statistics) {
+      showAggregatedStats(result);
+      activeStats.value = ['stats'];
+    } else if (result.statistics) {
+      showSingleStats(result);
+      activeStats.value = ['stats'];
+    }
+  } else {
+    appendLog(`[${new Date().toLocaleTimeString()}] ❌ ОШИБКА: ${result.message}`, 'error');
+  }
+  
+  isPredicting.value = false;
+};
+
+// Показать статистику для одного датасета
+const showSingleStats = (result) => {
+  let statsHTML = '<div class="stats-item">📊 Статистика предсказаний:</div>';
+  
+  if (result.statistics && typeof result.statistics === 'object') {
+    for (const [className, stat] of Object.entries(result.statistics)) {
+      let statText = '';
+      if (typeof stat === 'object' && stat.formatted) {
+        statText = stat.formatted;
+      } else if (typeof stat === 'string') {
+        statText = stat;
       } else {
-        config.input_files = this.selectedDatasets;
+        statText = JSON.stringify(stat);
       }
-
-      this.showStats = false;
-      this.connectWebSocket(config);
-    },
-
-    connectWebSocket(config) {
-      this.statusMessage = '🟡 Подключаемся к WebSocket...';
-      this.wsConnected = false;
-      this.logs = '';
-
-      this.ws = new WebSocket("ws://127.0.0.1:8000/api/ws/predict");
-
-      this.ws.onopen = () => {
-        this.statusMessage = '🟢 WebSocket подключён — запуск предсказания...';
-        this.wsConnected = true;
-        this.isPredicting = true;
-        
-        this.ws.send(JSON.stringify(config));
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          this.handleWebSocketMessage(data);
-        } catch (error) {
-          this.appendLog(`[${new Date().toLocaleTimeString()}] ${event.data}`, 'info');
-        }
-      };
-
-      this.ws.onclose = () => {
-        this.statusMessage = '🔴 Соединение закрыто';
-        this.wsConnected = false;
-        this.isPredicting = false;
-      };
-
-      this.ws.onerror = (error) => {
-        this.statusMessage = '❌ Ошибка соединения';
-        this.wsConnected = false;
-        console.error('WebSocket error:', error);
-        this.isPredicting = false;
-      };
-    },
-
-    handleWebSocketMessage(data) {
-      const timestamp = new Date().toLocaleTimeString();
-
-      switch (data.type) {
-        case 'log':
-          this.appendLog(`[${timestamp}] ${data.message}`, data.level);
-          break;
-        case 'result':
-          this.handleResult(data.data);
-          break;
-        case 'error':
-          this.appendLog(`[${timestamp}] ❌ ОШИБКА: ${data.data.error || data.data.message}`, 'error');
-          this.isPredicting = false;
-          break;
-        case 'connection':
-          this.appendLog(`[${timestamp}] 🔗 ${data.message}`, 'info');
-          break;
-        default:
-          this.appendLog(`[${timestamp}] ${JSON.stringify(data)}`, 'info');
-      }
-    },
-
-    handleResult(result) {
-      if (result.success) {
-        this.appendLog(`[${new Date().toLocaleTimeString()}] ✅ ${result.message}`, 'info');
-        
-        if (result.aggregated_statistics) {
-          this.showAggregatedStats(result);
-        } else if (result.statistics) {
-          this.showSingleStats(result);
-        }
-      } else {
-        this.appendLog(`[${new Date().toLocaleTimeString()}] ❌ ОШИБКА: ${result.message}`, 'error');
-      }
-      
-      this.isPredicting = false;
-    },
-
-    showSingleStats(result) {
-      let statsHTML = '<div class="stats-item">📊 Статистика предсказаний:</div>';
-      
-      if (result.statistics && typeof result.statistics === 'object') {
-        for (const [className, stat] of Object.entries(result.statistics)) {
-          let statText = '';
-          if (typeof stat === 'object' && stat.formatted) {
-            statText = stat.formatted;
-          } else if (typeof stat === 'string') {
-            statText = stat;
-          } else {
-            statText = JSON.stringify(stat);
-          }
-          statsHTML += `<div class="stats-item">   ${className}: ${statText}</div>`;
-        }
-      } else {
-        statsHTML += '<div class="stats-item">❌ Нет данных статистики</div>';
-      }
-      
-      if (result.accuracy) {
-        statsHTML += `
-          <div class="stats-item" style="margin-top: 10px; font-weight: bold; color: #28a745;">
-            🎯 Общая точность: ${result.accuracy.overall}
-          </div>
-          <div class="stats-item" style="font-weight: bold;">Точность по классам:</div>
-        `;
-        
-        if (result.accuracy.per_class) {
-          for (const [className, accuracy] of Object.entries(result.accuracy.per_class)) {
-            statsHTML += `<div class="stats-item">   ${className}: ${accuracy}</div>`;
-          }
-        }
-      }
-      
-      this.statsContent = statsHTML;
-      this.showStats = true;
-    },
-
-    showAggregatedStats(result) {
-      let statsHTML = `
-        <div class="stats-item">✅ Обработано датасетов: ${result.datasets_processed}</div>
-        <div class="stats-item">❌ Ошибок: ${result.datasets_failed}</div>
-        <div class="stats-item">📊 Всего точек: ${result.total_points?.toLocaleString() || 0}</div>
-      `;
-      
-      if (result.accuracy) {
-        statsHTML += `
-          <div class="stats-item" style="margin-top: 10px; font-weight: bold; color: #28a745;">
-            🎯 Общая точность: ${result.accuracy.overall}
-          </div>
-          <div class="stats-item" style="font-weight: bold;">Точность по классам:</div>
-        `;
-        
-        if (result.accuracy.per_class) {
-          for (const [className, accuracy] of Object.entries(result.accuracy.per_class)) {
-            statsHTML += `<div class="stats-item">   ${className}: ${accuracy}</div>`;
-          }
-        }
-      }
-      
-      statsHTML += `<div class="stats-item" style="margin-top: 10px; font-weight: bold;">Распределение по классам:</div>`;
-      
-      if (result.aggregated_statistics && typeof result.aggregated_statistics === 'object') {
-        for (const [className, stat] of Object.entries(result.aggregated_statistics)) {
-          statsHTML += `<div class="stats-item">   ${className}: ${stat}</div>`;
-        }
-      }
-      
-      if (result.individual_results) {
-        statsHTML += '<div class="stats-item" style="margin-top: 10px;"><strong>Детали по датасетам:</strong></div>';
-        
-        result.individual_results.forEach(dataset => {
-          if (dataset.success) {
-            const filename = dataset.input_file.split('/').pop();
-            let accuracyText = '';
-            if (dataset.accuracy) {
-              accuracyText = ` - Точность: ${dataset.accuracy.overall}`;
-            }
-            statsHTML += `<div class="stats-item" style="padding-left: 20px; font-size: 11px;">✓ ${filename}: ${dataset.total_points} точек${accuracyText}</div>`;
-          } else {
-            statsHTML += `<div class="stats-item" style="padding-left: 20px; font-size: 11px; color: #dc3545;">✗ ${dataset.input_file}: Ошибка</div>`;
-          }
-        });
-      }
-      
-      this.statsContent = statsHTML;
-      this.showStats = true;
-    },
-
-    appendLog(message, level = 'info') {
-      this.logs += message + '\n';
-      setTimeout(() => {
-        const logsElement = document.getElementById('logs');
-        if (logsElement) {
-          logsElement.scrollTop = logsElement.scrollHeight;
-        }
-      }, 10);
-    },
-
-    closeWebSocket() {
-      if (this.ws) {
-        this.ws.close();
-        this.ws = null;
+      statsHTML += `<div class="stats-item">   ${className}: ${statText}</div>`;
+    }
+  } else {
+    statsHTML += '<div class="stats-item">❌ Нет данных статистики</div>';
+  }
+  
+  if (result.accuracy) {
+    statsHTML += `
+      <div class="stats-item" style="margin-top: 10px; font-weight: bold; color: var(--el-color-success);">
+        🎯 Общая точность: ${result.accuracy.overall}
+      </div>
+      <div class="stats-item" style="font-weight: bold;">Точность по классам:</div>
+    `;
+    
+    if (result.accuracy.per_class) {
+      for (const [className, accuracy] of Object.entries(result.accuracy.per_class)) {
+        statsHTML += `<div class="stats-item">   ${className}: ${accuracy}</div>`;
       }
     }
   }
-}
+  
+  statsContent.value = statsHTML;
+};
+
+// Показать агрегированную статистику
+const showAggregatedStats = (result) => {
+  let statsHTML = `
+    <div class="stats-item">✅ Обработано датасетов: ${result.datasets_processed}</div>
+    <div class="stats-item">❌ Ошибок: ${result.datasets_failed}</div>
+    <div class="stats-item">📊 Всего точек: ${result.total_points?.toLocaleString() || 0}</div>
+  `;
+  
+  if (result.accuracy) {
+    statsHTML += `
+      <div class="stats-item" style="margin-top: 10px; font-weight: bold; color: var(--el-color-success);">
+        🎯 Общая точность: ${result.accuracy.overall}
+      </div>
+      <div class="stats-item" style="font-weight: bold;">Точность по классам:</div>
+    `;
+    
+    if (result.accuracy.per_class) {
+      for (const [className, accuracy] of Object.entries(result.accuracy.per_class)) {
+        statsHTML += `<div class="stats-item">   ${className}: ${accuracy}</div>`;
+      }
+    }
+  }
+  
+  statsHTML += `<div class="stats-item" style="margin-top: 10px; font-weight: bold;">Распределение по классам:</div>`;
+  
+  if (result.aggregated_statistics && typeof result.aggregated_statistics === 'object') {
+    for (const [className, stat] of Object.entries(result.aggregated_statistics)) {
+      statsHTML += `<div class="stats-item">   ${className}: ${stat}</div>`;
+    }
+  }
+  
+  if (result.individual_results) {
+    statsHTML += '<div class="stats-item" style="margin-top: 10px;"><strong>Детали по датасетам:</strong></div>';
+    
+    result.individual_results.forEach(dataset => {
+      if (dataset.success) {
+        const filename = dataset.input_file.split('/').pop();
+        let accuracyText = '';
+        if (dataset.accuracy) {
+          accuracyText = ` - Точность: ${dataset.accuracy.overall}`;
+        }
+        statsHTML += `<div class="stats-item" style="padding-left: 20px; font-size: 12px;">✓ ${filename}: ${dataset.total_points} точек${accuracyText}</div>`;
+      } else {
+        statsHTML += `<div class="stats-item" style="padding-left: 20px; font-size: 12px; color: var(--el-color-danger);">✗ ${dataset.input_file}: Ошибка</div>`;
+      }
+    });
+  }
+  
+  statsContent.value = statsHTML;
+};
+
+// Добавление логов
+const appendLog = (message, level = 'info') => {
+  logs.value += message + '\n';
+};
+
+// Загрузка логов
+const downloadLogs = () => {
+  if (!logs.value) return;
+  
+  const blob = new Blob([logs.value], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `prediction_logs_${new Date().toISOString().slice(0, 19).replace(/[:]/g, '-')}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  
+  ElMessage.success('Логи успешно скачаны');
+};
+
+// Очистка логов
+const clearLogs = () => {
+  logs.value = '';
+  ElMessage.info('Логи очищены');
+};
+
+// Закрытие WebSocket
+const closeWebSocket = () => {
+  if (ws.value) {
+    ws.value.close();
+    ws.value = null;
+  }
+};
+
+// Жизненный цикл
+onMounted(() => {
+  loadData();
+});
+
+onUnmounted(() => {
+  closeWebSocket();
+});
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .predict-page {
-  font-family: Arial, sans-serif;
-  margin: 20px;
-}
+  padding: 24px;
+  background: var(--el-bg-color-page);
+  min-height: 100vh;
 
-h1 {
-  color: #333;
-  text-align: center;
-}
-
-.predict-container {
-  display: flex;
-  gap: 20px;
-}
-
-.config-panel {
-  flex: 1;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  padding: 20px;
-}
-
-.logs-panel {
-  flex: 2;
-  border: 1px solid #ddd;
-  border-radius: 5px;
-  padding: 20px;
-}
-
-.form-group {
-  margin-bottom: 15px;
-}
-
-label {
-  display: block;
-  margin-bottom: 5px;
-  font-weight: bold;
-}
-
-input, select {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.predict-btn {
-  background: #17a2b8;
-  color: white;
-  padding: 12px 20px;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-  width: 100%;
-  font-size: 16px;
-}
-
-.predict-btn:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
-}
-
-#logs {
-  background: #1e1e1e;
-  color: #d4d4d4;
-  padding: 15px;
-  height: 500px;
-  overflow-y: scroll;
-  border-radius: 5px;
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.3;
-  white-space: pre-wrap;
-}
-
-.status {
-  padding: 10px;
-  margin-bottom: 10px;
-  border-radius: 5px;
-}
-
-.status.connected {
-  background: #d4edda;
-  color: #155724;
-}
-
-.status.disconnected {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.dataset-selector {
-  margin-bottom: 10px;
-}
-
-.dataset-item {
-  display: flex;
-  align-items: center;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  margin-bottom: 5px;
-  background: #f8f9fa;
-}
-
-.dataset-item input {
-  width: auto;
-  margin-right: 10px;
-}
-
-.dataset-item label {
-  margin: 0;
-  font-weight: normal;
-  flex-grow: 1;
-}
-
-.stats-panel {
-  margin-top: 20px;
-  padding: 15px;
-  background: #f8f9fa;
-  border-radius: 5px;
-}
-
-.stats-header {
-  font-weight: bold;
-  margin-bottom: 10px;
-  color: #333;
-}
-
-.stats-item {
-  margin-bottom: 5px;
-  padding: 5px;
-  background: white;
-  border-radius: 3px;
-}
-
-.info-box {
-  margin-top: 20px;
-  padding: 10px;
-  background: #f8f9fa;
-  border-radius: 5px;
-  color: #333;
-}
-
-.info-box small {
-  display: block;
-}
-
-/* Стили для темной темы */
-@media (prefers-color-scheme: dark) {
-  .info-box {
-    color: #ffffff;
+  &__header {
+    text-align: center;
+    margin-bottom: 32px;
+    
+    .el-icon {
+      margin-bottom: 16px;
+      filter: drop-shadow(0 0 12px var(--el-color-primary-light-5));
+    }
   }
-  
+
+  &__title {
+    margin: 0 0 8px;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--el-text-color-primary);
+    background: linear-gradient(135deg, var(--el-color-primary), var(--el-color-primary-light-3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  &__subtitle {
+    color: var(--el-text-color-secondary);
+    font-size: 14px;
+    margin-top: 8px;
+  }
+
+  &__container {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+
+    @media (max-width: 1200px) {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  &__config-panel,
+  &__logs-panel {
+    background: var(--el-bg-color);
+    border: 1px solid var(--el-border-color-light);
+    border-radius: var(--el-border-radius-base);
+    
+    :deep(.el-card__header) {
+      background: var(--el-fill-color-lighter);
+      border-bottom: 1px solid var(--el-border-color-light);
+      padding: 16px 20px;
+    }
+  }
+
+  &__panel-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+
+    .el-icon {
+      color: var(--el-color-primary);
+      font-size: 20px;
+    }
+  }
+
+  .model-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+
+    .model-name {
+      flex: 1;
+      font-weight: 500;
+      color: var(--el-text-color-primary);
+    }
+
+    .model-size {
+      font-size: 12px;
+      color: var(--el-text-color-placeholder);
+    }
+  }
+
+  .no-models {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--el-color-warning);
+  }
+
+  .datasets-selector {
+    border: 1px solid var(--el-border-color);
+    border-radius: var(--el-border-radius-base);
+    padding: 16px;
+    background: var(--el-fill-color-light);
+  }
+
+  .datasets-loading {
+    padding: 20px;
+  }
+
+  .datasets-empty {
+    padding: 40px 20px;
+  }
+
+  .datasets-list {
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .dataset-card {
+    margin-bottom: 8px;
+    border: 1px solid var(--el-border-color-light);
+    
+    :deep(.el-card__body) {
+      padding: 12px;
+    }
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  .dataset-info {
+    flex: 1;
+    
+    .dataset-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      
+      .dataset-name {
+        font-weight: 600;
+        color: var(--el-text-color-primary);
+        font-size: 14px;
+      }
+    }
+    
+    .dataset-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+      
+      .dataset-file {
+        font-family: 'SF Mono', 'Consolas', monospace;
+      }
+      
+      .dataset-size {
+        color: var(--el-text-color-placeholder);
+      }
+    }
+  }
+
+  .datasets-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--el-border-color-light);
+  }
+
+  &__actions {
+    margin-top: 24px;
+  }
+
+  &__predict-btn {
+    width: 100%;
+    font-size: 16px;
+    height: 48px;
+    
+    :deep(.el-icon) {
+      font-size: 18px;
+    }
+  }
+
+  &__stats-collapse {
+    margin-top: 24px;
+    
+    .stats-content {
+      padding: 8px;
+      
+      .stats-item {
+        margin-bottom: 6px;
+        padding: 4px 8px;
+        background: var(--el-fill-color-light);
+        border-radius: var(--el-border-radius-base);
+        font-size: 13px;
+      }
+    }
+  }
+
+  &__info-box {
+    margin-top: 24px;
+    background: var(--el-color-info-light-9);
+    border: 1px solid var(--el-color-info-light-5);
+    
+    :deep(.el-alert__title) {
+      color: var(--el-color-info);
+    }
+  }
+
+  &__info-list {
+    margin: 0;
+    padding-left: 20px;
+    color: var(--el-text-color-regular);
+
+    li {
+      margin-bottom: 6px;
+      
+      &:last-child {
+        margin-bottom: 0;
+      }
+      
+      strong {
+        color: var(--el-text-color-primary);
+        font-weight: 600;
+      }
+    }
+  }
+
+  &__status {
+    margin-bottom: 20px;
+  }
+
+  &__status-alert {
+    :deep(.el-alert__title) {
+      font-weight: 500;
+    }
+  }
+
+  &__logs-container {
+    position: relative;
+    border: 1px solid var(--el-border-color);
+    border-radius: var(--el-border-radius-base);
+    background: var(--el-fill-color-light);
+    overflow: hidden;
+  }
+
+  &__logs-content {
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 16px;
+    margin: 0;
+    white-space: pre-wrap;
+    color: var(--el-text-color-primary);
+  }
+
+  &__logs-empty {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  &__logs-actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+  }
+}
+
+// Адаптивность
+@media (max-width: 768px) {
   .predict-page {
-    background-color: #121212;
-    color: #ffffff;
+    padding: 16px;
+    
+    &__title {
+      font-size: 24px;
+    }
+    
+    &__container {
+      gap: 16px;
+    }
+    
+    &__panel-header {
+      h3 {
+        font-size: 16px;
+      }
+    }
+    
+    :deep(.el-form-item__label) {
+      width: 100% !important;
+      text-align: left !important;
+      margin-bottom: 8px;
+    }
+    
+    :deep(.el-form-item__content) {
+      margin-left: 0 !important;
+    }
   }
-  
-  .config-panel,
-  .logs-panel {
-    background: #1e1e1e;
-    border-color: #333;
-    color: #ffffff;
-  }
-  
-  .dataset-item {
-    background: #2d2d2d;
-    border-color: #444;
-  }
-  
-  .stats-panel {
-    background: #2d2d2d;
-  }
-  
-  .stats-header {
-    color: #ffffff;
-  }
-  
-  .stats-item {
-    background: #1e1e1e;
-  }
-}
-
-/* Для класса на body */
-:global(body.dark-theme) .info-box {
-  color: #ffffff;
-}
-
-:global(body.dark-theme) .predict-page {
-  background-color: #121212;
-  color: #ffffff;
-}
-
-:global(body.dark-theme) .config-panel,
-:global(body.dark-theme) .logs-panel {
-  background: #1e1e1e;
-  border-color: #333;
-  color: #ffffff;
-}
-
-:global(body.dark-theme) .dataset-item {
-  background: #2d2d2d;
-  border-color: #444;
-}
-
-:global(body.dark-theme) .stats-panel {
-  background: #2d2d2d;
-}
-
-:global(body.dark-theme) .stats-header {
-  color: #ffffff;
-}
-
-:global(body.dark-theme) .stats-item {
-  background: #1e1e1e;
 }
 </style>
