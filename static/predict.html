@@ -34,7 +34,14 @@
         }
         .connected { background: #d4edda; color: #155724; }
         .disconnected { background: #f8d7da; color: #721c24; }
-        .dataset-selector { margin-bottom: 10px; }
+        .dataset-selector { 
+            margin-bottom: 10px; 
+            max-height: 250px; 
+            overflow-y: auto; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            padding: 10px;
+        }
         .dataset-item { 
             display: flex; 
             align-items: center; 
@@ -64,6 +71,103 @@
             background: white; 
             border-radius: 3px;
         }
+        .detailed-stats-panel { 
+            margin-top: 20px; 
+            padding: 15px; 
+            background: #f8f9fa; 
+            border-radius: 5px; 
+            display: none;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+        }
+        .dataset-stat-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .dataset-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .class-stat-row {
+            display: flex;
+            align-items: center;
+            padding: 3px 0;
+            font-size: 12px;
+        }
+        .class-name {
+            width: 120px;
+            font-weight: bold;
+        }
+        .class-count {
+            width: 100px;
+            text-align: right;
+        }
+        .class-percentage {
+            width: 80px;
+            text-align: right;
+            color: #666;
+        }
+        .class-accuracy {
+            width: 100px;
+            text-align: right;
+            font-weight: bold;
+        }
+        .high-accuracy { color: #28a745; }
+        .medium-accuracy { color: #ffc107; }
+        .low-accuracy { color: #dc3545; }
+        .overall-accuracy {
+            margin-top: 5px;
+            padding: 5px;
+            background: #e8f4f8;
+            border-radius: 3px;
+            font-weight: bold;
+            color: #17a2b8;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .btn-group button {
+            flex: 1;
+            padding: 8px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .btn-group button:hover {
+            background: #5a6268;
+        }
+        .btn-group button:first-child {
+            background: #28a745;
+        }
+        .btn-group button:first-child:hover {
+            background: #218838;
+        }
+        .btn-group button:last-child {
+            background: #dc3545;
+        }
+        .btn-group button:last-child:hover {
+            background: #c82333;
+        }
+        .selection-count {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .log-info { color: #d4d4d4; }
+        .log-success { color: #28a745; font-weight: bold; }
+        .log-warning { color: #ffc107; }
+        .log-error { color: #dc3545; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -90,11 +194,12 @@
             
             <div class="form-group">
                 <label>Unlabeled датасеты:</label>
-                <div id="datasetList" class="dataset-selector">
-                </div>
-                <div style="margin-top: 10px;">
+                <div class="selection-count" id="selectionCount">Выбрано: 0 файлов</div>
+                <div class="btn-group">
                     <button type="button" onclick="selectAllDatasets()">Выбрать все</button>
                     <button type="button" onclick="deselectAllDatasets()">Снять все</button>
+                </div>
+                <div id="datasetList" class="dataset-selector">
                 </div>
             </div>
             
@@ -111,17 +216,21 @@
             <button class="predict-btn" onclick="startPrediction()" id="predictBtn">🔮 Запустить предсказание</button>
             
             <div class="stats-panel" id="statsPanel">
-                <div class="stats-header">📊 Агрегированная статистика:</div>
+                <div class="stats-header">📊 Общая статистика</div>
                 <div id="aggregatedStats"></div>
+            </div>
+            
+            <div class="detailed-stats-panel" id="detailedStatsPanel">
+                <div class="stats-header">📊 Детальная статистика по датасетам</div>
+                <div id="detailedStats"></div>
             </div>
             
             <div style="margin-top: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
                 <small>
-                    <strong>💡 Примечание:</strong><br>
-                    • Используется обученная модель<br>
-                    • Обрабатываются unlabeled датасеты<br>
-                    • Результаты сохраняются в datasets/predicted/<br>
-                    • <strong>Новое:</strong> поддержка множественных датасетов!
+                    <strong>💡 Новая функция:</strong><br>
+                    • Вывод точности для каждого датасета<br>
+                    • Формат: "Датасет: общая точность, класс 1: точность, класс N: точность"<br>
+                    • Поддержка множественных датасетов
                 </small>
             </div>
         </div>
@@ -167,23 +276,26 @@
             const datasetList = document.getElementById('datasetList');
             datasetList.innerHTML = '';
             
-            unlabeledDatasets.forEach(ds => {
+            unlabeledDatasets.forEach((ds, index) => {
                 const item = document.createElement('div');
                 item.className = 'dataset-item';
                 
                 const checkbox = document.createElement('input');
                 checkbox.type = 'checkbox';
-                checkbox.id = `dataset-${ds.file}`;
+                checkbox.id = `dataset-${index}`;
                 checkbox.value = `datasets/raw/${ds.file}`;
+                checkbox.onchange = updateSelectionCount;
                 
                 const label = document.createElement('label');
-                label.htmlFor = `dataset-${ds.file}`;
+                label.htmlFor = `dataset-${index}`;
                 label.textContent = `${ds.name} (${ds.points} точек)`;
                 
                 item.appendChild(checkbox);
                 item.appendChild(label);
                 datasetList.appendChild(item);
             });
+            
+            updateSelectionCount();
             
         } catch (error) {
             console.error('Ошибка загрузки данных:', error);
@@ -192,11 +304,19 @@
         }
     }
 
+    // Обновить счетчик выбранных файлов
+    function updateSelectionCount() {
+        const selectedCount = getSelectedDatasets().length;
+        document.getElementById('selectionCount').textContent = 
+            `Выбрано: ${selectedCount} файлов`;
+    }
+
     // Выбрать все датасеты
     function selectAllDatasets() {
         document.querySelectorAll('#datasetList input[type="checkbox"]').forEach(checkbox => {
             checkbox.checked = true;
         });
+        updateSelectionCount();
     }
 
     // Снять все датасеты
@@ -204,6 +324,7 @@
         document.querySelectorAll('#datasetList input[type="checkbox"]').forEach(checkbox => {
             checkbox.checked = false;
         });
+        updateSelectionCount();
     }
 
     // Получить выбранные датасеты
@@ -247,6 +368,10 @@
 
         // Скрываем статистику перед новым запуском
         document.getElementById('statsPanel').style.display = 'none';
+        document.getElementById('detailedStatsPanel').style.display = 'none';
+        
+        // Очищаем логи
+        document.getElementById('logs').innerHTML = '';
         
         connectWebSocket(config);
     }
@@ -326,6 +451,12 @@
             status.className = 'status disconnected';
             status.textContent = '❌ Ошибка соединения';
             console.error('WebSocket error:', error);
+            
+            const errorLine = document.createElement('div');
+            errorLine.className = 'log-error';
+            errorLine.textContent = `[${new Date().toLocaleTimeString()}] ❌ Не удалось подключиться к серверу`;
+            logs.appendChild(errorLine);
+            
             finishPrediction();
         };
     }
@@ -333,23 +464,26 @@
     // Обработка результата предсказания
     function handleResult(result) {
         const resultLine = document.createElement('div');
-        resultLine.className = 'log-info';
+        resultLine.className = 'log-success';
         
         if (result.success) {
             resultLine.textContent = `[${new Date().toLocaleTimeString()}] ✅ ${result.message}`;
             logs.appendChild(resultLine);
             
+            // Показываем статистику
             if (result.aggregated_statistics) {
                 showAggregatedStats(result);
+                showDetailedStats(result);
             } else if (result.statistics) {
                 showSingleStats(result);
             }
         } else {
-            resultLine.textContent = `[${new Date().toLocaleTimeString()}] ❌ ОШИБКА: ${result.message}`;
             resultLine.className = 'log-error';
+            resultLine.textContent = `[${new Date().toLocaleTimeString()}] ❌ ОШИБКА: ${result.message}`;
             logs.appendChild(resultLine);
         }
         
+        logs.scrollTop = logs.scrollHeight;
         finishPrediction();
     }
 
@@ -403,7 +537,7 @@
         statsPanel.style.display = 'block';
     }
 
-        // Показать агрегированную статистику для нескольких датасетов
+    // Показать агрегированную статистику для нескольких датасетов
     function showAggregatedStats(result) {
         const statsPanel = document.getElementById('statsPanel');
         const statsContent = document.getElementById('aggregatedStats');
@@ -445,36 +579,116 @@
             }
         }
         
-        // Показываем детали по каждому датасету
-        if (result.individual_results) {
-            const detailsItem = document.createElement('div');
-            detailsItem.className = 'stats-item';
-            detailsItem.style.marginTop = '10px';
-            detailsItem.innerHTML = '<strong>Детали по датасетам:</strong>';
-            statsContent.appendChild(detailsItem);
-            
-            result.individual_results.forEach(dataset => {
-                const datasetItem = document.createElement('div');
-                datasetItem.className = 'stats-item';
-                datasetItem.style.paddingLeft = '20px';
-                datasetItem.style.fontSize = '11px';
-                
-                if (dataset.success) {
-                    const filename = dataset.input_file.split('/').pop();
-                    let accuracyText = '';
-                    if (dataset.accuracy) {
-                        accuracyText = ` - Точность: ${dataset.accuracy.overall}`;
-                    }
-                    datasetItem.textContent = `✓ ${filename}: ${dataset.total_points} точек${accuracyText}`;
-                } else {
-                    datasetItem.textContent = `✗ ${dataset.input_file}: Ошибка`;
-                    datasetItem.style.color = '#dc3545';
-                }
-                statsContent.appendChild(datasetItem);
-            });
+        statsPanel.style.display = 'block';
+    }
+
+    // Показать детальную статистику для нескольких датасетов
+    function showDetailedStats(result) {
+        const detailedPanel = document.getElementById('detailedStatsPanel');
+        const detailedContent = document.getElementById('detailedStats');
+        
+        if (!result.detailed_statistics || result.detailed_statistics.length === 0) {
+            detailedPanel.style.display = 'none';
+            return;
         }
         
-        statsPanel.style.display = 'block';
+        detailedContent.innerHTML = '';
+        
+        result.detailed_statistics.forEach((datasetStat, index) => {
+            const datasetItem = document.createElement('div');
+            datasetItem.className = 'dataset-stat-item';
+            
+            // Название датасета
+            const datasetName = document.createElement('div');
+            datasetName.className = 'dataset-name';
+            datasetName.textContent = `${index + 1}. ${datasetStat.dataset} (${datasetStat.total_points.toLocaleString()} точек)`;
+            datasetItem.appendChild(datasetName);
+            
+            // Общая точность
+            if (datasetStat.accuracy) {
+                const accuracyDiv = document.createElement('div');
+                accuracyDiv.className = 'overall-accuracy';
+                accuracyDiv.textContent = `🎯 Общая точность: ${datasetStat.accuracy.overall}`;
+                datasetItem.appendChild(accuracyDiv);
+            }
+            
+            // Таблица классов
+            const classTable = document.createElement('div');
+            classTable.style.marginTop = '10px';
+            
+            // Заголовки
+            const headerRow = document.createElement('div');
+            headerRow.className = 'class-stat-row';
+            headerRow.style.fontWeight = 'bold';
+            headerRow.style.borderBottom = '1px solid #ddd';
+            headerRow.style.paddingBottom = '5px';
+            headerRow.innerHTML = `
+                <div class="class-name">Класс</div>
+                <div class="class-count">Кол-во</div>
+                <div class="class-percentage">%</div>
+                <div class="class-accuracy">Точность</div>
+            `;
+            classTable.appendChild(headerRow);
+            
+            // Данные по классам
+            if (datasetStat.class_distribution) {
+                Object.entries(datasetStat.class_distribution).forEach(([className, classData]) => {
+                    const classRow = document.createElement('div');
+                    classRow.className = 'class-stat-row';
+                    
+                    // Имя класса
+                    const nameCell = document.createElement('div');
+                    nameCell.className = 'class-name';
+                    nameCell.textContent = className;
+                    
+                    // Количество
+                    const countCell = document.createElement('div');
+                    countCell.className = 'class-count';
+                    countCell.textContent = classData.count ? classData.count.toLocaleString() : '-';
+                    
+                    // Процент
+                    const percCell = document.createElement('div');
+                    percCell.className = 'class-percentage';
+                    percCell.textContent = classData.percentage ? `${classData.percentage}%` : '-';
+                    
+                    // Точность
+                    const accCell = document.createElement('div');
+                    accCell.className = 'class-accuracy';
+                    
+                    let accuracyValue = 'N/A';
+                    let accuracyClass = 'low-accuracy';
+                    
+                    if (datasetStat.accuracy && datasetStat.accuracy.per_class && datasetStat.accuracy.per_class[className]) {
+                        accuracyValue = datasetStat.accuracy.per_class[className];
+                        const accNum = parseFloat(accuracyValue);
+                        if (accNum >= 80) accuracyClass = 'high-accuracy';
+                        else if (accNum >= 50) accuracyClass = 'medium-accuracy';
+                        else accuracyClass = 'low-accuracy';
+                        accCell.className = `class-accuracy ${accuracyClass}`;
+                    }
+                    
+                    accCell.textContent = accuracyValue;
+                    
+                    classRow.appendChild(nameCell);
+                    classRow.appendChild(countCell);
+                    classRow.appendChild(percCell);
+                    classRow.appendChild(accCell);
+                    classTable.appendChild(classRow);
+                });
+                
+                datasetItem.appendChild(classTable);
+            } else {
+                const noData = document.createElement('div');
+                noData.className = 'stats-item';
+                noData.style.fontStyle = 'italic';
+                noData.textContent = 'Нет данных о распределении классов';
+                datasetItem.appendChild(noData);
+            }
+            
+            detailedContent.appendChild(datasetItem);
+        });
+        
+        detailedPanel.style.display = 'block';
     }
 
     // Завершение предсказания
@@ -482,10 +696,15 @@
         isPredicting = false;
         document.getElementById('predictBtn').disabled = false;
         document.getElementById('predictBtn').textContent = '🔮 Запустить предсказание';
+        
+        // Закрываем WebSocket если открыт
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.close();
+        }
     }
 
     // Загружаем данные при открытии страницы
-    loadData();
-</script>
+    window.addEventListener('DOMContentLoaded', loadData);
+    </script>
 </body>
 </html>
