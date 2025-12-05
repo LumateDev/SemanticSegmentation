@@ -11,6 +11,8 @@ export interface TrainedModel {
   size: string;
   modified: string;
   folder?: string;
+  path: string;
+  full_path: string;
 }
 
 // Файл датасета (когда запрашиваем с subdir)

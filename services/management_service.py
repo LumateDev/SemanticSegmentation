@@ -65,22 +65,20 @@ def get_trained_models():
             file_suffix = pth_file.stem
 
             if file_suffix == 'model':
-                # Для основной модели можно не добавлять суффикс, или сделать как-то иначе
-                # display_name = display_name_base # Вариант 1: без суффикса для 'model.pth'
-                display_name = f"{display_name_base} ({file_suffix})" # Вариант 2: со суффиксом, чтобы быть ясным
+                display_name = f"{display_name_base} ({file_suffix})"
             else:
-                # Для best_model.pth и других всегда добавляем суффикс
                 display_name = f"{display_name_base} ({file_suffix})"
 
+            folder_with_base = f"checkpoints/{model_folder.as_posix()}"
 
             trained_models.append({
-                "name": pth_file.name, # Оригинальное имя файла, например, 'model.pth'
-                "display_name": display_name, # Отображаемое имя, например, 'univer_night_20251123_034213 (model)' или 'univer_night_20251123_034213 (best_model)'
-                "path": str(rel_path), # Относительный путь, например, 'DGCNN/univer_night_20251123_034213/model.pth'
-                "full_path": str(pth_file), # Полный путь к файлу
+                "name": pth_file.name,
+                "display_name": display_name,
+                "path": str(rel_path),
+                "full_path": str(pth_file),
                 "size": f"{stat.st_size / 1024 / 1024:.1f} MB",
                 "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                "folder": str(model_folder), # Имя папки, например, 'DGCNN/univer_night_20251123_034213'
+                "folder": folder_with_base,
                 "info": model_info
             })
 

@@ -25,63 +25,73 @@
     <!-- Loading -->
     <div v-if="isLoading" v-loading="true" class="datasets-list__loading" />
 
-    <!-- Folders (root level) -->
-    <div v-else-if="hasFolders" class="datasets-list__folders">
-      <h4 class="datasets-list__section-title">Папки</h4>
-      <el-row :gutter="16">
-        <el-col v-for="folder in folders" :key="folder.name" :xs="24" :sm="12" :md="8" :lg="6">
-          <el-card class="datasets-list__folder-card" shadow="hover" @click="handleFolderClick(folder.name)">
-            <div class="datasets-list__folder-content">
-              <el-icon class="datasets-list__folder-icon" :size="32">
-                <Folder />
-              </el-icon>
-              <div class="datasets-list__folder-info">
-                <span class="datasets-list__folder-name">{{ folder.name }}</span>
-                <span class="datasets-list__folder-meta"> {{ folder.filesCount }} файлов </span>
-              </div>
-            </div>
-          </el-card>
-        </el-col>
-      </el-row>
-    </div>
-
-    <!-- Files (inside folder) -->
-    <div v-else-if="hasFiles" class="datasets-list__files">
-      <h4 class="datasets-list__section-title">
-        Файлы
-        <el-tag type="info" size="small">{{ files.length }}</el-tag>
-      </h4>
-
-      <el-table :data="files" stripe highlight-current-row class="datasets-list__table" @row-click="handleRowClick">
-        <el-table-column prop="file" label="Имя файла" min-width="200">
-          <template #default="{ row }">
-            <div class="datasets-list__file-name">
-              <el-icon><Document /></el-icon>
-              <span>{{ row.file }}</span>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="size" label="Размер" width="120" />
-
-        <el-table-column prop="points" label="Точек" width="140">
-          <template #default="{ row }">
-            <el-tag type="success" size="small">{{ row.points }}</el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="Действия" width="140" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" :icon="PieChart" @click.stop="handleShowStats(row)">
-              Статистика
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-
     <!-- Empty -->
-    <el-empty v-else description="Нет данных" class="datasets-list__empty" />
+    <el-empty v-else-if="!hasFolders && !hasFiles" description="Нет данных" class="datasets-list__empty" />
+
+    <!-- Content with scroll -->
+    <el-scrollbar v-else class="datasets-list__content">
+      <!-- Folders (root level) -->
+      <div v-if="hasFolders" class="datasets-list__folders">
+        <h4 class="datasets-list__section-title">Папки</h4>
+        <el-row :gutter="16">
+          <el-col v-for="folder in folders" :key="folder.name" :xs="24" :sm="12" :md="8" :lg="6">
+            <el-card class="datasets-list__folder-card" shadow="hover" @click="handleFolderClick(folder.name)">
+              <div class="datasets-list__folder-content">
+                <el-icon class="datasets-list__folder-icon" :size="32">
+                  <Folder />
+                </el-icon>
+                <div class="datasets-list__folder-info">
+                  <span class="datasets-list__folder-name">{{ folder.name }}</span>
+                  <span class="datasets-list__folder-meta"> {{ folder.filesCount }} файлов </span>
+                </div>
+              </div>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+
+      <!-- Files (inside folder) -->
+      <div v-else-if="hasFiles" class="datasets-list__files">
+        <h4 class="datasets-list__section-title">
+          Файлы
+          <el-tag type="info" size="small">{{ files.length }}</el-tag>
+        </h4>
+
+        <el-table
+          :data="files"
+          stripe
+          highlight-current-row
+          class="datasets-list__table"
+          @row-click="handleRowClick"
+          max-height="600"
+        >
+          <el-table-column prop="file" label="Имя файла" min-width="200">
+            <template #default="{ row }">
+              <div class="datasets-list__file-name">
+                <el-icon><Document /></el-icon>
+                <span>{{ row.file }}</span>
+              </div>
+            </template>
+          </el-table-column>
+
+          <el-table-column prop="size" label="Размер" width="120" />
+
+          <el-table-column prop="points" label="Точек" width="140">
+            <template #default="{ row }">
+              <el-tag type="success" size="small">{{ row.points }}</el-tag>
+            </template>
+          </el-table-column>
+
+          <el-table-column label="Действия" width="140" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" :icon="PieChart" @click.stop="handleShowStats(row)">
+                Статистика
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-scrollbar>
   </div>
 </template>
 
@@ -144,6 +154,10 @@ onMounted(() => {
     min-height: 200px;
   }
 
+  &__empty {
+    padding: 60px 0;
+  }
+
   &__section-title {
     margin: 0 0 16px;
     font-size: 16px;
@@ -157,6 +171,7 @@ onMounted(() => {
   }
 
   &__folders {
+    overflow: hidden !important;
     margin-bottom: 24px;
   }
 
@@ -170,10 +185,6 @@ onMounted(() => {
     &:hover {
       transform: translateY(-2px);
       box-shadow: var(--el-box-shadow);
-    }
-
-    :deep(.el-card__body) {
-      padding: 20px;
     }
   }
 
@@ -207,8 +218,6 @@ onMounted(() => {
   }
 
   &__table {
-    width: 100%;
-
     :deep(.el-table__row) {
       cursor: pointer;
     }
@@ -222,10 +231,6 @@ onMounted(() => {
     .el-icon {
       color: var(--el-color-primary);
     }
-  }
-
-  &__empty {
-    padding: 60px 0;
   }
 }
 </style>
