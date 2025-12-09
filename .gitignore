@@ -13,6 +13,7 @@ logs/
 checkpoints/
 
 # Large data
+datasets/
 datasets/raw
 datasets/unlabeled
 datasets/predicted
